@@ -57,7 +57,7 @@ const mapCreator = (r) => ({
   id: r.id, name: r.name, handle: r.handle, platform: r.platform, phone: r.phone,
   email: r.email, gst: r.gst, pan: r.pan,
   bank: { name: r.bank_name, acc: r.bank_acc, ifsc: r.bank_ifsc },
-  standard: r.standard,
+  standard: r.standard, socialLinks: r.social_links || [],
 });
 const mapCampaign = (r) => ({
   id: r.id, name: r.name, brandId: r.brand_id, poc: r.poc,
@@ -72,7 +72,7 @@ const mapDeal = (r) => ({
 const mapDeliverable = (r) => ({
   id: r.id, dealId: r.deal_id, type: r.type, brief: r.brief, due: r.due,
   status: r.status, scheduled: r.scheduled, live: r.live, completed: r.completed,
-  revisionNotes: r.revision_notes,
+  revisionNotes: r.revision_notes, stage: r.stage || "Briefing",
 });
 const mapCreatorInvoice = (r) => ({
   id: r.id, dealId: r.deal_id, invoiceNumber: r.invoice_number, date: r.date,
@@ -101,6 +101,7 @@ const mapNotification = (r) => ({
 
 const DELIVERABLE_FLOW = ["Brief", "Script Pending", "Script Submitted", "Script Approved", "Video Submitted", "Revision", "Approved", "Scheduled", "Live", "Completed"];
 const CAMPAIGN_STATUSES = ["Draft", "Upcoming", "Active", "Paused", "Completed", "Cancelled"];
+const STAGES = ["Briefing", "Scripting", "Shoot/Production", "Editing", "Approval", "Live"];
 
 /* ============================== WORDMARK ============================== */
 const RepCreatorsLogo = ({ size = "md" }) => {
@@ -285,11 +286,21 @@ function LoginScreen() {
     });
     if (signUpError) {
       setLoading(false);
-      setError(signUpError.message || "Could not create account.");
+      // Supabase phrases "already registered" a few different ways —
+      // show a calm, professional message either way.
+      if (/already registered|already exists|user already/i.test(signUpError.message || "")) {
+        setError("An account with this email already exists. Try signing in instead.");
+      } else {
+        setError("Confirmation pending.");
+      }
       return;
     }
     // Create a matching profiles row with role "pending" — this user has no
     // dashboard access until an admin changes their role in Supabase.
+    // Note: if email confirmation is still enabled in Supabase, there is no
+    // active session yet at this point, so this insert may be blocked by
+    // RLS. We treat that as a normal, expected state — not an error — since
+    // the account still exists and just needs admin approval.
     if (data?.user) {
       const { error: profileError } = await supabase.from("profiles").insert({
         id: data.user.id,
@@ -298,7 +309,7 @@ function LoginScreen() {
       });
       if (profileError) {
         setLoading(false);
-        setError("Account created, but profile setup failed: " + profileError.message);
+        setMode("signupSuccess");
         return;
       }
     }
@@ -324,10 +335,7 @@ function LoginScreen() {
             <div className="mx-auto w-10 h-10 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center mb-3">
               <Check size={18} className="text-emerald-600" />
             </div>
-            <h1 className="f-display text-lg font-semibold text-slate-900 mb-1">Account created</h1>
-            <p className="text-sm text-slate-500 f-body mb-4">
-              Your account is waiting on admin approval before you can sign in. You'll be notified once access is granted.
-            </p>
+            <h1 className="f-display text-lg font-semibold text-slate-900 mb-1">Confirmation pending</h1>
             <Btn variant="secondary" onClick={() => { setMode("signin"); setPassword(""); }}>Back to sign in</Btn>
           </div>
         </div>
@@ -766,6 +774,57 @@ export default function App() {
     fetchAllData();
   };
 
+  /* ---------- deletions ---------- */
+  const deleteBrand = async (id) => {
+    if (!confirm("Delete this brand? This also removes its campaigns, deals, deliverables, and invoices. This cannot be undone.")) return;
+    const { error } = await supabase.from("brands").delete().eq("id", id);
+    if (error) { showToast("Failed to delete brand: " + error.message); return; }
+    showToast("Brand deleted");
+    setSel((s) => ({ ...s, brand: null }));
+    fetchAllData();
+  };
+  const deleteCreator = async (id) => {
+    if (!confirm("Delete this creator? This also removes their deals, deliverables, and invoices. This cannot be undone.")) return;
+    const { error } = await supabase.from("creators").delete().eq("id", id);
+    if (error) { showToast("Failed to delete creator: " + error.message); return; }
+    showToast("Creator deleted");
+    setSel((s) => ({ ...s, creator: null }));
+    fetchAllData();
+  };
+  const deleteCampaign = async (id) => {
+    if (!confirm("Delete this campaign? This also removes its deals and deliverables. This cannot be undone.")) return;
+    const { error } = await supabase.from("campaigns").delete().eq("id", id);
+    if (error) { showToast("Failed to delete campaign: " + error.message); return; }
+    showToast("Campaign deleted");
+    setSel((s) => ({ ...s, campaign: null }));
+    fetchAllData();
+  };
+  const deleteDeal = async (id) => {
+    if (!confirm("Delete this deal? This also removes its deliverables. This cannot be undone.")) return;
+    const { error } = await supabase.from("deals").delete().eq("id", id);
+    if (error) { showToast("Failed to delete deal: " + error.message); return; }
+    showToast("Deal deleted");
+    fetchAllData();
+  };
+  const deleteDeliverable = async (id) => {
+    if (!confirm("Delete this deliverable? This cannot be undone.")) return;
+    const { error } = await supabase.from("deliverables").delete().eq("id", id);
+    if (error) { showToast("Failed to delete deliverable: " + error.message); return; }
+    showToast("Deliverable deleted");
+    fetchAllData();
+  };
+  const updateCreatorSocials = async (id, socialLinks) => {
+    const { error } = await supabase.from("creators").update({ social_links: socialLinks }).eq("id", id);
+    if (error) { showToast("Failed to save social links: " + error.message); return; }
+    showToast("Social links updated");
+    fetchAllData();
+  };
+  const updateDeliverableStage = async (id, stage) => {
+    const { error } = await supabase.from("deliverables").update({ stage }).eq("id", id);
+    if (error) { showToast("Failed to update stage: " + error.message); return; }
+    fetchAllData();
+  };
+
   /* ---------- global search ---------- */
   const searchResults = useMemo(() => {
     if (!query.trim()) return null;
@@ -786,6 +845,7 @@ export default function App() {
     { id: "creators", label: "Creators", icon: Users },
     { id: "campaigns", label: "Campaigns", icon: Briefcase },
     { id: "deliverables", label: "Deliverables", icon: ListChecks },
+    { id: "stages", label: "Stages", icon: CalendarClock },
     { id: "creatorInvoices", label: "Creator Invoices", icon: Receipt },
     { id: "brandInvoices", label: "Brand Invoices", icon: FileText },
     { id: "payments", label: "Payments", icon: Wallet },
@@ -934,19 +994,22 @@ export default function App() {
               {activeModule === "dashboard" && role === "creator" && <CreatorHome creatorId={demoCreatorId} creator={creatorById(demoCreatorId)} totals={creatorTotals(demoCreatorId)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.creator?.id === demoCreatorId)} invoices={creatorInvoicesWithJoins.filter((i) => i.creator?.id === demoCreatorId)} goTo={goTo} />}
 
               {activeModule === "brands" && !sel.brand && <BrandsList brands={db.brands} brandTotals={brandTotals} goTo={goTo} onAdd={() => setModal({ type: "addBrand" })} />}
-              {activeModule === "brands" && sel.brand && <BrandDetail brand={brandById(sel.brand)} totals={brandTotals(sel.brand)} dealsWithJoins={dealsWithJoins} brandInvoicesWithJoins={brandInvoicesWithJoins.filter((b) => b.brand?.id === sel.brand)} documents={db.documents.filter((d) => d.entityType === "brand" && d.entityId === sel.brand)} goTo={goTo} back={() => setSel((s) => ({ ...s, brand: null }))} />}
+              {activeModule === "brands" && sel.brand && <BrandDetail brand={brandById(sel.brand)} totals={brandTotals(sel.brand)} dealsWithJoins={dealsWithJoins} brandInvoicesWithJoins={brandInvoicesWithJoins.filter((b) => b.brand?.id === sel.brand)} documents={db.documents.filter((d) => d.entityType === "brand" && d.entityId === sel.brand)} goTo={goTo} back={() => setSel((s) => ({ ...s, brand: null }))} onDelete={deleteBrand} />}
 
               {activeModule === "creators" && !sel.creator && <CreatorsList creators={db.creators} creatorTotals={creatorTotals} goTo={goTo} onAdd={() => setModal({ type: "addCreator" })} role={role} />}
-              {activeModule === "creators" && sel.creator && <CreatorDetail creator={creatorById(sel.creator)} totals={creatorTotals(sel.creator)} invoices={creatorInvoicesWithJoins.filter((i) => i.creator?.id === sel.creator)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.creator?.id === sel.creator)} documents={db.documents.filter((d) => d.entityType === "creator" && d.entityId === sel.creator)} goTo={goTo} back={() => setSel((s) => ({ ...s, creator: null }))} />}
+              {activeModule === "creators" && sel.creator && <CreatorDetail creator={creatorById(sel.creator)} totals={creatorTotals(sel.creator)} invoices={creatorInvoicesWithJoins.filter((i) => i.creator?.id === sel.creator)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.creator?.id === sel.creator)} documents={db.documents.filter((d) => d.entityType === "creator" && d.entityId === sel.creator)} goTo={goTo} back={() => setSel((s) => ({ ...s, creator: null }))} onDelete={deleteCreator} onSaveSocials={updateCreatorSocials} />}
 
               {activeModule === "campaigns" && !sel.campaign && role !== "creator" && <CampaignsList campaigns={db.campaigns} brandById={brandById} campaignFinancials={campaignFinancials} goTo={goTo} onAdd={() => setModal({ type: "addCampaign" })} />}
               {activeModule === "campaigns" && role === "creator" && (() => {
                 const myCampIds = [...new Set(dealsWithJoins.filter(d => d.creatorId === demoCreatorId).map(d => d.campaignId))];
                 return <CampaignsList campaigns={db.campaigns.filter(c => myCampIds.includes(c.id))} brandById={brandById} campaignFinancials={campaignFinancials} goTo={goTo} restricted />;
               })()}
-              {activeModule === "campaigns" && sel.campaign && <CampaignDetail campaign={campaignById(sel.campaign)} brand={brandById(campaignById(sel.campaign)?.brandId)} deals={dealsWithJoins.filter((d) => d.campaignId === sel.campaign)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.campaign?.id === sel.campaign)} brandInvoices={brandInvoicesWithJoins.filter((b) => b.campaignId === sel.campaign)} financials={campaignFinancials(sel.campaign)} goTo={goTo} back={() => setSel((s) => ({ ...s, campaign: null }))} onAddDeal={() => setModal({ type: "addDeal", campaignId: sel.campaign })} onStatusChange={updateDeliverableStatus} role={role} />}
+              {activeModule === "campaigns" && sel.campaign && <CampaignDetail campaign={campaignById(sel.campaign)} brand={brandById(campaignById(sel.campaign)?.brandId)} deals={dealsWithJoins.filter((d) => d.campaignId === sel.campaign)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.campaign?.id === sel.campaign)} brandInvoices={brandInvoicesWithJoins.filter((b) => b.campaignId === sel.campaign)} financials={campaignFinancials(sel.campaign)} goTo={goTo} back={() => setSel((s) => ({ ...s, campaign: null }))} onAddDeal={() => setModal({ type: "addDeal", campaignId: sel.campaign })} onStatusChange={updateDeliverableStatus} role={role} onDeleteCampaign={deleteCampaign} onDeleteDeal={deleteDeal} onDeleteDeliverable={deleteDeliverable} />}
 
-              {activeModule === "deliverables" && <DeliverablesModule rows={role === "creator" ? deliverablesWithJoins.filter(d => d.creator?.id === demoCreatorId) : deliverablesWithJoins} onStatusChange={updateDeliverableStatus} goTo={goTo} role={role} />}
+              {activeModule === "deliverables" && <DeliverablesModule rows={role === "creator" ? deliverablesWithJoins.filter(d => d.creator?.id === demoCreatorId) : deliverablesWithJoins} onStatusChange={updateDeliverableStatus} goTo={goTo} role={role} onDelete={deleteDeliverable} />}
+
+              {activeModule === "stages" && <StagesModule rows={deliverablesWithJoins} onStageChange={updateDeliverableStage} goTo={goTo} />}
+
 
               {activeModule === "creatorInvoices" && <CreatorInvoicesModule rows={role === "creator" ? creatorInvoicesWithJoins.filter(i => i.creator?.id === demoCreatorId) : creatorInvoicesWithJoins} onApprove={approveCreatorInvoice} onReject={rejectCreatorInvoice} onRetrySync={retryZohoSync} onRecordPayment={(id, amt) => recordCreatorPayment(id, amt)} onSubmit={() => setModal({ type: "submitInvoice" })} goTo={goTo} role={role} />}
 
@@ -1095,12 +1158,12 @@ function BrandsList({ brands, brandTotals, goTo, onAdd }) {
   );
 }
 
-function BrandDetail({ brand, totals, dealsWithJoins, brandInvoicesWithJoins, documents, goTo, back }) {
+function BrandDetail({ brand, totals, dealsWithJoins, brandInvoicesWithJoins, documents, goTo, back, onDelete }) {
   const [tab, setTab] = useState("overview");
   if (!brand) return null;
   return (
     <div>
-      <SectionHeader title={brand.name} crumbs={[{ label: "Brands", onClick: back }, { label: brand.name }]} />
+      <SectionHeader title={brand.name} crumbs={[{ label: "Brands", onClick: back }, { label: brand.name }]} action={<Btn variant="danger" size="sm" icon={XCircle} onClick={() => onDelete(brand.id)}>Delete Brand</Btn>} />
       <div className="grid grid-cols-4 gap-3 mb-5">
         <KPICard label="Total Business" value={inr(totals.invoiced)} tone="indigo" />
         <KPICard label="Amount Received" value={inr(totals.received)} tone="emerald" />
@@ -1176,20 +1239,20 @@ function CreatorsList({ creators, creatorTotals, goTo, onAdd, role }) {
   );
 }
 
-function CreatorDetail({ creator, totals, invoices, deliverablesWithJoins, documents, goTo, back }) {
+function CreatorDetail({ creator, totals, invoices, deliverablesWithJoins, documents, goTo, back, onDelete, onSaveSocials }) {
   const [tab, setTab] = useState("overview");
   if (!creator) return null;
   const brandsWorked = [...new Set(totals.deals.map((d) => d.campaign?.brandId))].length;
   return (
     <div>
-      <SectionHeader title={creator.name} crumbs={[{ label: "Creators", onClick: back }, { label: creator.name }]} />
+      <SectionHeader title={creator.name} crumbs={[{ label: "Creators", onClick: back }, { label: creator.name }]} action={<Btn variant="danger" size="sm" icon={XCircle} onClick={() => onDelete(creator.id)}>Delete Creator</Btn>} />
       <div className="grid grid-cols-4 gap-3 mb-5">
         <KPICard label="Total Earnings" value={inr(totals.earnings)} tone="indigo" />
         <KPICard label="Paid" value={inr(totals.paid)} tone="emerald" />
         <KPICard label="Outstanding" value={inr(totals.outstanding)} tone="amber" />
         <KPICard label="Brands Worked With" value={brandsWorked} tone="slate" />
       </div>
-      <Tabs tab={tab} setTab={setTab} tabs={["overview", "campaigns", "invoices", "documents"]} />
+      <Tabs tab={tab} setTab={setTab} tabs={["overview", "social", "campaigns", "invoices", "documents"]} />
       {tab === "overview" && (
         <div className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-5 grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
           <InfoRow label="Handle" value={`${creator.handle} · ${creator.platform}`} />
@@ -1200,6 +1263,9 @@ function CreatorDetail({ creator, totals, invoices, deliverablesWithJoins, docum
           <InfoRow label="Bank" value={`${creator.bank?.name} · ${creator.bank?.acc} · ${creator.bank?.ifsc}`} />
           <InfoRow label="Standard Commercials" value={creator.standard} full />
         </div>
+      )}
+      {tab === "social" && (
+        <SocialLinksEditor creator={creator} onSave={onSaveSocials} />
       )}
       {tab === "campaigns" && (
         <Table head={["Campaign", "Brand", "Scope", "Amount", "Deal Status"]}>
@@ -1260,12 +1326,17 @@ function CampaignsList({ campaigns, brandById, campaignFinancials, goTo, onAdd, 
   );
 }
 
-function CampaignDetail({ campaign, brand, deals, deliverablesWithJoins, brandInvoices, financials, goTo, back, onAddDeal, onStatusChange, role }) {
+function CampaignDetail({ campaign, brand, deals, deliverablesWithJoins, brandInvoices, financials, goTo, back, onAddDeal, onStatusChange, role, onDeleteCampaign, onDeleteDeal, onDeleteDeliverable }) {
   const [tab, setTab] = useState("overview");
   if (!campaign) return null;
   return (
     <div>
-      <SectionHeader title={campaign.name} crumbs={[{ label: "Campaigns", onClick: back }, { label: campaign.name }]} action={<Badge tone={statusTone(campaign.status)}>{campaign.status}</Badge>} />
+      <SectionHeader title={campaign.name} crumbs={[{ label: "Campaigns", onClick: back }, { label: campaign.name }]} action={
+        <div className="flex items-center gap-2">
+          <Badge tone={statusTone(campaign.status)}>{campaign.status}</Badge>
+          {role !== "creator" && <Btn variant="danger" size="sm" icon={XCircle} onClick={() => onDeleteCampaign(campaign.id)}>Delete Campaign</Btn>}
+        </div>
+      } />
       <div className="grid grid-cols-4 gap-3 mb-5">
         <KPICard label="Revenue" value={inr(financials.revenue)} tone="indigo" />
         <KPICard label="Creator Cost" value={inr(financials.creatorCost)} tone="slate" />
@@ -1286,21 +1357,22 @@ function CampaignDetail({ campaign, brand, deals, deliverablesWithJoins, brandIn
       {tab === "deals" && (
         <div>
           {role !== "creator" && <div className="flex justify-end mb-3"><Btn size="sm" icon={Plus} onClick={onAddDeal}>Add Deal</Btn></div>}
-          <Table head={["Creator", "Scope", "Amount", "Deal Status", "Approval"]}>
+          <Table head={["Creator", "Scope", "Amount", "Deal Status", "Approval", role !== "creator" ? "" : null].filter(Boolean)}>
             {deals.map((d) => (
-              <Tr key={d.id} onClick={() => goTo("creators", d.creator?.id)}>
-                <Td><span className="font-medium text-slate-900">{d.creator?.name}</span></Td>
+              <Tr key={d.id}>
+                <Td onClick={() => goTo("creators", d.creator?.id)}><span className="font-medium text-slate-900 cursor-pointer hover:text-red-600">{d.creator?.name}</span></Td>
                 <Td muted>{d.scope}</Td>
                 <Td mono>{inr(d.amount)}</Td>
                 <Td><Badge tone={statusTone(d.status)}>{d.status}</Badge></Td>
                 <Td><Badge tone={statusTone(d.approval === "Approved" ? "Approved" : "Pending Review")}>{d.approval}</Badge></Td>
+                {role !== "creator" && <Td><button onClick={() => onDeleteDeal(d.id)} title="Delete deal"><XCircle size={15} className="text-slate-400 hover:text-red-600" /></button></Td>}
               </Tr>
             ))}
           </Table>
         </div>
       )}
       {tab === "deliverables" && (
-        <Table head={["Creator", "Type", "Brief", "Due", "Status", role !== "creator" ? "Update" : null].filter(Boolean)}>
+        <Table head={["Creator", "Type", "Brief", "Due", "Status", role !== "creator" ? "Update" : null, role !== "creator" ? "" : null].filter(Boolean)}>
           {deliverablesWithJoins.map((d) => (
             <Tr key={d.id}>
               <Td>{d.creator?.name}</Td>
@@ -1313,6 +1385,7 @@ function CampaignDetail({ campaign, brand, deals, deliverablesWithJoins, brandIn
                   {DELIVERABLE_FLOW.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </Td>}
+              {role !== "creator" && <Td><button onClick={() => onDeleteDeliverable(d.id)} title="Delete deliverable"><XCircle size={15} className="text-slate-400 hover:text-red-600" /></button></Td>}
             </Tr>
           ))}
         </Table>
@@ -1337,7 +1410,7 @@ function CampaignDetail({ campaign, brand, deals, deliverablesWithJoins, brandIn
 }
 
 /* ============================== DELIVERABLES ============================== */
-function DeliverablesModule({ rows, onStatusChange, goTo, role }) {
+function DeliverablesModule({ rows, onStatusChange, goTo, role, onDelete }) {
   const [filter, setFilter] = useState("all");
   const filtered = filter === "all" ? rows : rows.filter((r) => r.status === filter);
   return (
@@ -1348,8 +1421,8 @@ function DeliverablesModule({ rows, onStatusChange, goTo, role }) {
           {DELIVERABLE_FLOW.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
       } />
-      <Table head={["Creator", "Brand", "Campaign", "Type", "Brief", "Due", "Status", role !== "creator" ? "Update" : null].filter(Boolean)}>
-        {filtered.length === 0 && <tr><td colSpan={8}><EmptyState text="No deliverables match this filter." /></td></tr>}
+      <Table head={["Creator", "Brand", "Campaign", "Type", "Brief", "Due", "Status", role !== "creator" ? "Update" : null, role !== "creator" ? "" : null].filter(Boolean)}>
+        {filtered.length === 0 && <tr><td colSpan={9}><EmptyState text="No deliverables match this filter." /></td></tr>}
         {filtered.map((d) => (
           <Tr key={d.id}>
             <Td onClick={() => goTo("creators", d.creator?.id)}><span className="text-red-600 hover:underline cursor-pointer">{d.creator?.name}</span></Td>
@@ -1364,6 +1437,7 @@ function DeliverablesModule({ rows, onStatusChange, goTo, role }) {
                 {DELIVERABLE_FLOW.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </Td>}
+            {role !== "creator" && <Td><button onClick={() => onDelete(d.id)} title="Delete"><XCircle size={15} className="text-slate-400 hover:text-red-600" /></button></Td>}
           </Tr>
         ))}
       </Table>
@@ -1783,6 +1857,103 @@ function PendingUserRow({ profile, creators, onApprove, saving }) {
         <Btn size="sm" variant="success" icon={Check} onClick={() => onApprove(profile.id, role, creatorId)} disabled={saving}>
           {saving ? "Saving…" : "Approve"}
         </Btn>
+      </div>
+    </div>
+  );
+}
+
+const SOCIAL_PLATFORMS = ["Instagram", "YouTube", "X (Twitter)", "LinkedIn", "TikTok", "Facebook", "Threads", "Telegram", "Other"];
+
+function SocialLinksEditor({ creator, onSave }) {
+  const [links, setLinks] = useState(creator.socialLinks && creator.socialLinks.length ? creator.socialLinks : [{ platform: "Instagram", url: "" }]);
+  const [saving, setSaving] = useState(false);
+
+  const updateLink = (i, key, value) => {
+    setLinks((prev) => prev.map((l, idx) => idx === i ? { ...l, [key]: value } : l));
+  };
+  const addLink = () => setLinks((prev) => [...prev, { platform: "Instagram", url: "" }]);
+  const removeLink = (i) => setLinks((prev) => prev.filter((_, idx) => idx !== i));
+  const save = async () => {
+    setSaving(true);
+    const cleaned = links.filter((l) => l.url.trim());
+    await onSave(creator.id, cleaned);
+    setSaving(false);
+  };
+
+  return (
+    <div className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-5">
+      <div className="space-y-3 mb-4">
+        {links.map((l, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <select value={l.platform} onChange={(e) => updateLink(i, "platform", e.target.value)} className="text-sm border border-red-100 rounded-lg px-2.5 py-2 f-body w-40 shrink-0">
+              {SOCIAL_PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <input
+              type="url"
+              placeholder="https://..."
+              value={l.url}
+              onChange={(e) => updateLink(i, "url", e.target.value)}
+              className={inputCls}
+            />
+            <button onClick={() => removeLink(i)} className="text-slate-400 hover:text-red-600 shrink-0"><X size={16} /></button>
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-between">
+        <Btn variant="secondary" size="sm" icon={Plus} onClick={addLink}>Add Platform</Btn>
+        <Btn variant="success" size="sm" onClick={save}>{saving ? "Saving…" : "Save Social Links"}</Btn>
+      </div>
+      {creator.socialLinks && creator.socialLinks.length > 0 && (
+        <div className="mt-4 pt-4 border-t border-slate-100 flex flex-wrap gap-2">
+          {creator.socialLinks.map((l, i) => (
+            <a key={i} href={l.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs bg-slate-50 border border-red-100 rounded-full px-2.5 py-1 text-slate-600 hover:text-red-600">
+              {l.platform} <ExternalLink size={10} />
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================== STAGES (KANBAN) ============================== */
+function StagesModule({ rows, onStageChange, goTo }) {
+  const columns = STAGES.map((stage) => ({
+    stage,
+    items: rows.filter((r) => (r.stage || "Briefing") === stage),
+  }));
+
+  return (
+    <div>
+      <SectionHeader title="Stages" />
+      <div className="grid grid-cols-6 gap-3">
+        {columns.map((col) => (
+          <div key={col.stage} className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 flex flex-col min-h-[200px]">
+            <div className="px-3 py-2.5 border-b border-red-50 flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-700 f-display uppercase tracking-wide">{col.stage}</span>
+              <span className="text-xs text-slate-400 f-ledger">{col.items.length}</span>
+            </div>
+            <div className="p-2 space-y-2 flex-1">
+              {col.items.length === 0 && <div className="text-xs text-slate-300 f-body text-center py-4">—</div>}
+              {col.items.map((d) => (
+                <div key={d.id} className="border border-slate-100 rounded-lg p-2.5 hover:border-red-200 transition-colors">
+                  <div onClick={() => goTo("campaigns", d.campaign?.id)} className="cursor-pointer">
+                    <div className="text-xs font-medium text-slate-800 f-body">{d.creator?.name}</div>
+                    <div className="text-[11px] text-slate-400 f-body mt-0.5 line-clamp-2">{d.brief}</div>
+                    <div className="text-[10px] text-slate-400 mt-1">{d.brand?.name} · {d.type}</div>
+                  </div>
+                  <select
+                    value={d.stage || "Briefing"}
+                    onChange={(e) => onStageChange(d.id, e.target.value)}
+                    className="w-full mt-2 text-[11px] border border-red-100 rounded-md px-1.5 py-1 f-body"
+                  >
+                    {STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
