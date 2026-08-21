@@ -845,7 +845,6 @@ export default function App() {
     { id: "creators", label: "Creators", icon: Users },
     { id: "campaigns", label: "Campaigns", icon: Briefcase },
     { id: "deliverables", label: "Deliverables", icon: ListChecks },
-    { id: "stages", label: "Stages", icon: CalendarClock },
     { id: "creatorInvoices", label: "Creator Invoices", icon: Receipt },
     { id: "brandInvoices", label: "Brand Invoices", icon: FileText },
     { id: "payments", label: "Payments", icon: Wallet },
@@ -997,7 +996,7 @@ export default function App() {
               {activeModule === "brands" && sel.brand && <BrandDetail brand={brandById(sel.brand)} totals={brandTotals(sel.brand)} dealsWithJoins={dealsWithJoins} brandInvoicesWithJoins={brandInvoicesWithJoins.filter((b) => b.brand?.id === sel.brand)} documents={db.documents.filter((d) => d.entityType === "brand" && d.entityId === sel.brand)} goTo={goTo} back={() => setSel((s) => ({ ...s, brand: null }))} onDelete={deleteBrand} />}
 
               {activeModule === "creators" && !sel.creator && <CreatorsList creators={db.creators} creatorTotals={creatorTotals} goTo={goTo} onAdd={() => setModal({ type: "addCreator" })} role={role} />}
-              {activeModule === "creators" && sel.creator && <CreatorDetail creator={creatorById(sel.creator)} totals={creatorTotals(sel.creator)} invoices={creatorInvoicesWithJoins.filter((i) => i.creator?.id === sel.creator)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.creator?.id === sel.creator)} documents={db.documents.filter((d) => d.entityType === "creator" && d.entityId === sel.creator)} goTo={goTo} back={() => setSel((s) => ({ ...s, creator: null }))} onDelete={deleteCreator} onSaveSocials={updateCreatorSocials} />}
+              {activeModule === "creators" && sel.creator && <CreatorDetail creator={creatorById(sel.creator)} totals={creatorTotals(sel.creator)} invoices={creatorInvoicesWithJoins.filter((i) => i.creator?.id === sel.creator)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.creator?.id === sel.creator)} documents={db.documents.filter((d) => d.entityType === "creator" && d.entityId === sel.creator)} goTo={goTo} back={() => setSel((s) => ({ ...s, creator: null }))} onDelete={deleteCreator} onSaveSocials={updateCreatorSocials} onStageChange={updateDeliverableStage} />}
 
               {activeModule === "campaigns" && !sel.campaign && role !== "creator" && <CampaignsList campaigns={db.campaigns} brandById={brandById} campaignFinancials={campaignFinancials} goTo={goTo} onAdd={() => setModal({ type: "addCampaign" })} />}
               {activeModule === "campaigns" && role === "creator" && (() => {
@@ -1007,8 +1006,6 @@ export default function App() {
               {activeModule === "campaigns" && sel.campaign && <CampaignDetail campaign={campaignById(sel.campaign)} brand={brandById(campaignById(sel.campaign)?.brandId)} deals={dealsWithJoins.filter((d) => d.campaignId === sel.campaign)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.campaign?.id === sel.campaign)} brandInvoices={brandInvoicesWithJoins.filter((b) => b.campaignId === sel.campaign)} financials={campaignFinancials(sel.campaign)} goTo={goTo} back={() => setSel((s) => ({ ...s, campaign: null }))} onAddDeal={() => setModal({ type: "addDeal", campaignId: sel.campaign })} onStatusChange={updateDeliverableStatus} role={role} onDeleteCampaign={deleteCampaign} onDeleteDeal={deleteDeal} onDeleteDeliverable={deleteDeliverable} />}
 
               {activeModule === "deliverables" && <DeliverablesModule rows={role === "creator" ? deliverablesWithJoins.filter(d => d.creator?.id === demoCreatorId) : deliverablesWithJoins} onStatusChange={updateDeliverableStatus} goTo={goTo} role={role} onDelete={deleteDeliverable} />}
-
-              {activeModule === "stages" && <StagesModule rows={deliverablesWithJoins} onStageChange={updateDeliverableStage} goTo={goTo} />}
 
 
               {activeModule === "creatorInvoices" && <CreatorInvoicesModule rows={role === "creator" ? creatorInvoicesWithJoins.filter(i => i.creator?.id === demoCreatorId) : creatorInvoicesWithJoins} onApprove={approveCreatorInvoice} onReject={rejectCreatorInvoice} onRetrySync={retryZohoSync} onRecordPayment={(id, amt) => recordCreatorPayment(id, amt)} onSubmit={() => setModal({ type: "submitInvoice" })} goTo={goTo} role={role} />}
@@ -1239,10 +1236,12 @@ function CreatorsList({ creators, creatorTotals, goTo, onAdd, role }) {
   );
 }
 
-function CreatorDetail({ creator, totals, invoices, deliverablesWithJoins, documents, goTo, back, onDelete, onSaveSocials }) {
+function CreatorDetail({ creator, totals, invoices, deliverablesWithJoins, documents, goTo, back, onDelete, onSaveSocials, onStageChange }) {
   const [tab, setTab] = useState("overview");
   if (!creator) return null;
   const brandsWorked = [...new Set(totals.deals.map((d) => d.campaign?.brandId))].length;
+  // Only show deliverables belonging to active campaigns for the stage checklist
+  const activeDeliverables = deliverablesWithJoins.filter((d) => d.campaign?.status === "Active");
   return (
     <div>
       <SectionHeader title={creator.name} crumbs={[{ label: "Creators", onClick: back }, { label: creator.name }]} action={<Btn variant="danger" size="sm" icon={XCircle} onClick={() => onDelete(creator.id)}>Delete Creator</Btn>} />
@@ -1252,7 +1251,7 @@ function CreatorDetail({ creator, totals, invoices, deliverablesWithJoins, docum
         <KPICard label="Outstanding" value={inr(totals.outstanding)} tone="amber" />
         <KPICard label="Brands Worked With" value={brandsWorked} tone="slate" />
       </div>
-      <Tabs tab={tab} setTab={setTab} tabs={["overview", "social", "campaigns", "invoices", "documents"]} />
+      <Tabs tab={tab} setTab={setTab} tabs={["overview", "stages", "social", "campaigns", "invoices", "documents"]} />
       {tab === "overview" && (
         <div className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-5 grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
           <InfoRow label="Handle" value={`${creator.handle} · ${creator.platform}`} />
@@ -1263,6 +1262,9 @@ function CreatorDetail({ creator, totals, invoices, deliverablesWithJoins, docum
           <InfoRow label="Bank" value={`${creator.bank?.name} · ${creator.bank?.acc} · ${creator.bank?.ifsc}`} />
           <InfoRow label="Standard Commercials" value={creator.standard} full />
         </div>
+      )}
+      {tab === "stages" && (
+        <CreatorStagesChecklist deliverables={activeDeliverables} onStageChange={onStageChange} goTo={goTo} />
       )}
       {tab === "social" && (
         <SocialLinksEditor creator={creator} onSave={onSaveSocials} />
@@ -1916,45 +1918,44 @@ function SocialLinksEditor({ creator, onSave }) {
   );
 }
 
-/* ============================== STAGES (KANBAN) ============================== */
-function StagesModule({ rows, onStageChange, goTo }) {
-  const columns = STAGES.map((stage) => ({
-    stage,
-    items: rows.filter((r) => (r.stage || "Briefing") === stage),
-  }));
-
+/* ============================== CREATOR STAGES CHECKLIST ============================== */
+function CreatorStagesChecklist({ deliverables, onStageChange, goTo }) {
+  if (deliverables.length === 0) {
+    return <EmptyState text="No deliverables in active campaigns for this creator." />;
+  }
   return (
-    <div>
-      <SectionHeader title="Stages" />
-      <div className="grid grid-cols-6 gap-3">
-        {columns.map((col) => (
-          <div key={col.stage} className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 flex flex-col min-h-[200px]">
-            <div className="px-3 py-2.5 border-b border-red-50 flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-700 f-display uppercase tracking-wide">{col.stage}</span>
-              <span className="text-xs text-slate-400 f-ledger">{col.items.length}</span>
+    <div className="space-y-4">
+      {deliverables.map((d) => {
+        const currentIndex = STAGES.indexOf(d.stage || "Briefing");
+        return (
+          <div key={d.id} className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div onClick={() => goTo("campaigns", d.campaign?.id)} className="cursor-pointer">
+                <div className="text-sm font-medium text-slate-900 f-body">{d.brief}</div>
+                <div className="text-xs text-slate-400 f-body">{d.campaign?.name} · {d.type}</div>
+              </div>
+              <Badge tone={statusTone(d.status)}>{d.status}</Badge>
             </div>
-            <div className="p-2 space-y-2 flex-1">
-              {col.items.length === 0 && <div className="text-xs text-slate-300 f-body text-center py-4">—</div>}
-              {col.items.map((d) => (
-                <div key={d.id} className="border border-slate-100 rounded-lg p-2.5 hover:border-red-200 transition-colors">
-                  <div onClick={() => goTo("campaigns", d.campaign?.id)} className="cursor-pointer">
-                    <div className="text-xs font-medium text-slate-800 f-body">{d.creator?.name}</div>
-                    <div className="text-[11px] text-slate-400 f-body mt-0.5 line-clamp-2">{d.brief}</div>
-                    <div className="text-[10px] text-slate-400 mt-1">{d.brand?.name} · {d.type}</div>
-                  </div>
-                  <select
-                    value={d.stage || "Briefing"}
-                    onChange={(e) => onStageChange(d.id, e.target.value)}
-                    className="w-full mt-2 text-[11px] border border-red-100 rounded-md px-1.5 py-1 f-body"
+            <div className="flex items-center gap-1">
+              {STAGES.map((stage, i) => {
+                const done = i <= currentIndex;
+                return (
+                  <button
+                    key={stage}
+                    onClick={() => onStageChange(d.id, stage)}
+                    className={`flex-1 flex flex-col items-center gap-1.5 py-2 rounded-lg border transition-colors ${done ? "bg-emerald-50 border-emerald-200" : "bg-slate-50 border-slate-100 hover:border-red-200"}`}
                   >
-                    {STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                </div>
-              ))}
+                    <span className={`w-5 h-5 rounded-full flex items-center justify-center border ${done ? "bg-emerald-500 border-emerald-500" : "bg-white border-slate-300"}`}>
+                      {done && <Check size={12} className="text-white" />}
+                    </span>
+                    <span className={`text-[10px] f-body text-center leading-tight ${done ? "text-emerald-700 font-medium" : "text-slate-500"}`}>{stage}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }
