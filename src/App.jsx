@@ -238,15 +238,17 @@ const EmptyState = ({ text }) => (
   <div className="text-center py-10 text-slate-400 text-sm f-body">{text}</div>
 );
 
-/* ============================== LOGIN SCREEN ============================== */
+/* ============================== LOGIN / SIGNUP SCREEN ============================== */
 function LoginScreen() {
+  const [mode, setMode] = useState("signin"); // signin | signup | signupSuccess
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async () => {
+  const handleSignIn = async () => {
     if (!email.trim() || !password) {
       setError("Enter your email and password.");
       return;
@@ -266,9 +268,72 @@ function LoginScreen() {
     // picks up the new session automatically — nothing else to do here.
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === "Enter") handleSubmit();
+  const handleSignUp = async () => {
+    if (!email.trim() || !password || !displayName.trim()) {
+      setError("Fill in your name, email, and password.");
+      return;
+    }
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    const { data, error: signUpError } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+    });
+    if (signUpError) {
+      setLoading(false);
+      setError(signUpError.message || "Could not create account.");
+      return;
+    }
+    // Create a matching profiles row with role "pending" — this user has no
+    // dashboard access until an admin changes their role in Supabase.
+    if (data?.user) {
+      const { error: profileError } = await supabase.from("profiles").insert({
+        id: data.user.id,
+        display_name: displayName.trim(),
+        role: "pending",
+      });
+      if (profileError) {
+        setLoading(false);
+        setError("Account created, but profile setup failed: " + profileError.message);
+        return;
+      }
+    }
+    setLoading(false);
+    setMode("signupSuccess");
   };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") mode === "signup" ? handleSignUp() : handleSignIn();
+  };
+
+  if (mode === "signupSuccess") {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-gradient-to-br from-rose-200 via-amber-100 to-emerald-200 f-body p-4">
+        <FontStyles />
+        <div className="w-full max-w-sm">
+          <div className="flex flex-col items-center mb-6">
+            <div className="bg-slate-950 rounded-2xl px-6 py-5 shadow-lg shadow-rose-900/20 mb-4">
+              <RepCreatorsLogo />
+            </div>
+          </div>
+          <div className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-6 text-center">
+            <div className="mx-auto w-10 h-10 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center mb-3">
+              <Check size={18} className="text-emerald-600" />
+            </div>
+            <h1 className="f-display text-lg font-semibold text-slate-900 mb-1">Account created</h1>
+            <p className="text-sm text-slate-500 f-body mb-4">
+              Your account is waiting on admin approval before you can sign in. You'll be notified once access is granted.
+            </p>
+            <Btn variant="secondary" onClick={() => { setMode("signin"); setPassword(""); }}>Back to sign in</Btn>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen w-full flex items-center justify-center bg-gradient-to-br from-rose-200 via-amber-100 to-emerald-200 f-body p-4">
@@ -282,8 +347,10 @@ function LoginScreen() {
         </div>
 
         <div className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-6">
-          <h1 className="f-display text-lg font-semibold text-slate-900 mb-1">Sign in</h1>
-          <p className="text-sm text-slate-400 f-body mb-5">Access the rep/creators portal</p>
+          <h1 className="f-display text-lg font-semibold text-slate-900 mb-1">{mode === "signup" ? "Create account" : "Sign in"}</h1>
+          <p className="text-sm text-slate-400 f-body mb-5">
+            {mode === "signup" ? "New accounts require admin approval before access is granted." : "Access the rep/creators portal"}
+          </p>
 
           {error && (
             <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
@@ -291,9 +358,22 @@ function LoginScreen() {
             </div>
           )}
 
+          {mode === "signup" && (
+            <Field label="Full Name">
+              <input
+                autoFocus
+                type="text"
+                className={inputCls}
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Your name"
+              />
+            </Field>
+          )}
           <Field label="Email">
             <input
-              autoFocus
+              autoFocus={mode === "signin"}
               type="email"
               className={inputCls}
               value={email}
@@ -325,17 +405,26 @@ function LoginScreen() {
           <button
             type="button"
             disabled={loading}
-            onClick={handleSubmit}
+            onClick={mode === "signup" ? handleSignUp : handleSignIn}
             className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-60 font-medium f-body text-sm px-3.5 py-2.5 mt-2 transition-colors"
           >
-            <Lock size={14} /> {loading ? "Signing in…" : "Sign In"}
+            <Lock size={14} /> {loading ? (mode === "signup" ? "Creating account…" : "Signing in…") : (mode === "signup" ? "Create Account" : "Sign In")}
           </button>
+
+          <div className="text-center mt-4">
+            <button
+              type="button"
+              onClick={() => { setMode(mode === "signup" ? "signin" : "signup"); setError(""); }}
+              className="text-sm text-red-600 hover:underline f-body"
+            >
+              {mode === "signup" ? "Already have an account? Sign in" : "Need an account? Create one"}
+            </button>
+          </div>
         </div>
 
         <div className="bg-white/70 border border-red-100 rounded-xl p-4 mt-4 text-xs text-slate-500 f-body">
-          Accounts are created in your Supabase project (Authentication → Users), with a matching
-          row in the <span className="f-ledger">profiles</span> table setting each person's role
-          (admin / poc / creator).
+          New accounts are created with pending status. An admin must approve access
+          in the <span className="f-ledger">profiles</span> table before sign-in works.
         </div>
       </div>
     </div>
@@ -396,7 +485,6 @@ export default function App() {
       setRole(session.role);
       setAuthLoading(false);
     };
-
     supabase.auth.getSession().then(({ data }) => loadProfile(data?.session?.user));
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       loadProfile(session?.user || null);
@@ -703,6 +791,7 @@ export default function App() {
     { id: "payments", label: "Payments", icon: Wallet },
     { id: "reports", label: "Reports", icon: BarChart3 },
     { id: "documents", label: "Documents", icon: FolderOpen },
+    { id: "userApprovals", label: "User Approvals", icon: UserCircle2 },
   ];
   const NAV_CREATOR = [
     { id: "dashboard", label: "My Overview", icon: LayoutDashboard },
@@ -724,6 +813,31 @@ export default function App() {
 
   if (!auth) {
     return <LoginScreen />;
+  }
+
+  if (auth.role === "pending" || !auth.role) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-gradient-to-br from-rose-200 via-amber-100 to-emerald-200 f-body p-4">
+        <FontStyles />
+        <div className="w-full max-w-sm">
+          <div className="flex flex-col items-center mb-6">
+            <div className="bg-slate-950 rounded-2xl px-6 py-5 shadow-lg shadow-rose-900/20 mb-4">
+              <RepCreatorsLogo />
+            </div>
+          </div>
+          <div className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-6 text-center">
+            <div className="mx-auto w-10 h-10 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center mb-3">
+              <Clock size={18} className="text-amber-600" />
+            </div>
+            <h1 className="f-display text-lg font-semibold text-slate-900 mb-1">Awaiting approval</h1>
+            <p className="text-sm text-slate-500 f-body mb-4">
+              Hi {auth.displayName || auth.email} — your account is created but hasn't been approved yet. Check back once an admin grants you access.
+            </p>
+            <Btn variant="secondary" onClick={handleLogout}>Sign out</Btn>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -843,6 +957,8 @@ export default function App() {
               {activeModule === "reports" && role !== "creator" && <ReportsModule db={db} campaigns={db.campaigns} campaignFinancials={campaignFinancials} deliverablesWithJoins={deliverablesWithJoins} brandInvoicesWithJoins={brandInvoicesWithJoins} creatorInvoicesWithJoins={creatorInvoicesWithJoins} />}
 
               {activeModule === "documents" && role !== "creator" && <DocumentsModule documents={db.documents} brandById={brandById} creatorById={creatorById} />}
+
+              {activeModule === "userApprovals" && role === "admin" && <UserApprovalsModule creators={db.creators} showToast={showToast} />}
             </>
           )}
         </main>
@@ -1538,6 +1654,135 @@ function CreatorHome({ creator, totals, deliverablesWithJoins, invoices, goTo })
             ))}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================== USER APPROVALS ============================== */
+function UserApprovalsModule({ creators, showToast }) {
+  const [profiles, setProfiles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [savingId, setSavingId] = useState(null);
+
+  const fetchProfiles = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, display_name, role, creator_id, created_at")
+      .order("created_at", { ascending: false });
+    if (error) {
+      showToast("Failed to load users: " + error.message);
+      setLoading(false);
+      return;
+    }
+    setProfiles(data || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchProfiles(); }, []);
+
+  const updateRole = async (id, role, creatorId) => {
+    setSavingId(id);
+    const patch = { role };
+    if (role === "creator") patch.creator_id = creatorId || null;
+    if (role !== "creator") patch.creator_id = null;
+    const { error } = await supabase.from("profiles").update(patch).eq("id", id);
+    setSavingId(null);
+    if (error) { showToast("Failed to update user: " + error.message); return; }
+    showToast("User updated");
+    fetchProfiles();
+  };
+
+  const pending = profiles.filter((p) => p.role === "pending" || !p.role);
+  const approved = profiles.filter((p) => p.role && p.role !== "pending");
+
+  return (
+    <div>
+      <SectionHeader title="User Approvals" action={<Btn size="sm" icon={RefreshCw} variant="secondary" onClick={fetchProfiles}>Refresh</Btn>} />
+
+      <div className="mb-6">
+        <div className="text-sm font-medium text-slate-700 f-display mb-2">Pending ({pending.length})</div>
+        {loading ? (
+          <div className="text-sm text-slate-400 f-body">Loading…</div>
+        ) : pending.length === 0 ? (
+          <EmptyState text="No accounts waiting on approval." />
+        ) : (
+          <div className="space-y-3">
+            {pending.map((p) => (
+              <PendingUserRow key={p.id} profile={p} creators={creators} onApprove={updateRole} saving={savingId === p.id} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <div className="text-sm font-medium text-slate-700 f-display mb-2">Approved Users ({approved.length})</div>
+        <Table head={["Name", "Role", "Linked Creator", "Actions"]}>
+          {approved.length === 0 && <tr><td colSpan={4}><EmptyState text="No approved users yet." /></td></tr>}
+          {approved.map((p) => {
+            const linkedCreator = creators.find((c) => c.id === p.creator_id);
+            return (
+              <Tr key={p.id}>
+                <Td><span className="font-medium text-slate-900">{p.display_name || "—"}</span></Td>
+                <Td>
+                  <select
+                    value={p.role}
+                    onChange={(e) => updateRole(p.id, e.target.value, p.creator_id)}
+                    className="text-xs border border-red-100 rounded-md px-1.5 py-1 f-body"
+                  >
+                    <option value="admin">Admin</option>
+                    <option value="poc">POC</option>
+                    <option value="creator">Creator</option>
+                    <option value="pending">Pending (revoke)</option>
+                  </select>
+                </Td>
+                <Td muted>
+                  {p.role === "creator" ? (
+                    <select
+                      value={p.creator_id || ""}
+                      onChange={(e) => updateRole(p.id, "creator", e.target.value)}
+                      className="text-xs border border-red-100 rounded-md px-1.5 py-1 f-body"
+                    >
+                      <option value="">— none —</option>
+                      {creators.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  ) : "—"}
+                </Td>
+                <Td>{savingId === p.id && <span className="text-xs text-slate-400">Saving…</span>}</Td>
+              </Tr>
+            );
+          })}
+        </Table>
+      </div>
+    </div>
+  );
+}
+
+function PendingUserRow({ profile, creators, onApprove, saving }) {
+  const [role, setRole] = useState("poc");
+  const [creatorId, setCreatorId] = useState("");
+  return (
+    <div className="bg-white border border-amber-200 rounded-xl shadow-sm shadow-rose-900/10 p-4 flex items-center justify-between gap-4 flex-wrap">
+      <div>
+        <div className="font-medium text-slate-900 f-body">{profile.display_name || "Unnamed user"}</div>
+        <div className="text-xs text-slate-400 f-ledger">{profile.id}</div>
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <select value={role} onChange={(e) => setRole(e.target.value)} className="text-sm border border-red-100 rounded-lg px-2.5 py-1.5 f-body">
+          <option value="admin">Admin</option>
+          <option value="poc">POC</option>
+          <option value="creator">Creator</option>
+        </select>
+        {role === "creator" && (
+          <select value={creatorId} onChange={(e) => setCreatorId(e.target.value)} className="text-sm border border-red-100 rounded-lg px-2.5 py-1.5 f-body">
+            <option value="">Link to creator…</option>
+            {creators.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        )}
+        <Btn size="sm" variant="success" icon={Check} onClick={() => onApprove(profile.id, role, creatorId)} disabled={saving}>
+          {saving ? "Saving…" : "Approve"}
+        </Btn>
       </div>
     </div>
   );
