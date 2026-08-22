@@ -11,6 +11,7 @@ import {
   PieChart, Pie, Cell, Legend
 } from "recharts";
 import { supabase } from "./supabaseClient";
+import jsPDF from "jspdf";
 
 /* ============================== FONTS / TOKENS ============================== */
 const FontStyles = () => (
@@ -72,6 +73,90 @@ const timeAgo = (iso) => {
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.floor(hrs / 24)}d ago`;
+};
+
+// ---------- PDF generation (client-side, no backend needed) ----------
+const pdfHeader = (doc, title) => {
+  doc.setFillColor(15, 23, 42);
+  doc.rect(0, 0, 210, 28, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(16);
+  doc.text("rep/creators", 14, 17);
+  doc.setFontSize(10);
+  doc.setTextColor(226, 232, 240);
+  doc.text(title, 196, 17, { align: "right" });
+  doc.setTextColor(30, 41, 59);
+};
+
+const pdfRow = (doc, y, label, value) => {
+  doc.setFontSize(9);
+  doc.setTextColor(100, 116, 139);
+  doc.text(label, 14, y);
+  doc.setTextColor(30, 41, 59);
+  doc.setFontSize(10);
+  doc.text(String(value ?? "—"), 70, y);
+};
+
+const downloadCreatorInvoicePDF = (inv) => {
+  const doc = new jsPDF();
+  pdfHeader(doc, "CREATOR INVOICE");
+  let y = 42;
+  doc.setFontSize(13);
+  doc.text(`Invoice ${inv.invoiceNumber}`, 14, y); y += 10;
+  pdfRow(doc, y, "Creator", inv.creator?.name); y += 7;
+  pdfRow(doc, y, "Campaign", inv.campaign?.name); y += 7;
+  pdfRow(doc, y, "Brand", inv.brand?.name); y += 7;
+  pdfRow(doc, y, "Invoice Date", fmtDate(inv.date)); y += 7;
+  pdfRow(doc, y, "Due Date", fmtDate(inv.dueDate)); y += 7;
+  pdfRow(doc, y, "Status", inv.status); y += 12;
+
+  doc.setDrawColor(226, 232, 240);
+  doc.line(14, y, 196, y); y += 10;
+
+  pdfRow(doc, y, "Base Amount", inr(inv.amount)); y += 7;
+  pdfRow(doc, y, "GST", inr(inv.gst)); y += 7;
+  pdfRow(doc, y, "TDS Deducted", "-" + inr(inv.tds)); y += 10;
+  doc.setFontSize(12);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`Total Payable: ${inr(inv.total)}`, 14, y); y += 8;
+  doc.setFontSize(10);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Paid so far: ${inr(inv.paid)}  ·  Pending: ${inr(inv.pending)}`, 14, y);
+
+  if (inv.status === "Rejected" && inv.rejectReason) {
+    y += 12;
+    doc.setTextColor(220, 38, 38);
+    doc.text(`Rejected: ${inv.rejectReason}`, 14, y);
+  }
+
+  doc.save(`${inv.invoiceNumber}.pdf`);
+};
+
+const downloadBrandInvoicePDF = (inv) => {
+  const doc = new jsPDF();
+  pdfHeader(doc, "BRAND INVOICE");
+  let y = 42;
+  doc.setFontSize(13);
+  doc.text(`Invoice ${inv.invoiceNumber}`, 14, y); y += 10;
+  pdfRow(doc, y, "Billed To", inv.brand?.name); y += 7;
+  pdfRow(doc, y, "Campaign", inv.campaign?.name); y += 7;
+  pdfRow(doc, y, "Invoice Date", fmtDate(inv.date)); y += 7;
+  pdfRow(doc, y, "Due Date", fmtDate(inv.dueDate)); y += 7;
+  pdfRow(doc, y, "Status", inv.status); y += 12;
+
+  doc.setDrawColor(226, 232, 240);
+  doc.line(14, y, 196, y); y += 10;
+
+  pdfRow(doc, y, "Base Amount", inr(inv.amount)); y += 7;
+  pdfRow(doc, y, "GST", inr(inv.gst)); y += 10;
+  doc.setFontSize(12);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`Total: ${inr(inv.total)}`, 14, y); y += 8;
+  doc.setFontSize(10);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Received so far: ${inr(inv.received)}  ·  Pending: ${inr(inv.pending)}`, 14, y);
+
+  doc.save(`${inv.invoiceNumber}.pdf`);
 };
 
 const mapBrand = (r) => ({
@@ -242,8 +327,8 @@ const Field = ({ label, children }) => (
 const inputCls = "w-full border border-red-100 rounded-lg px-3 py-2 text-sm f-body focus:outline-none focus:ring-2 focus:ring-red-200 focus:border-red-400";
 
 const Table = ({ head, children }) => (
-  <div className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 overflow-hidden">
-    <table className="w-full text-sm">
+  <div className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 overflow-x-auto">
+    <table className="w-full text-sm min-w-[640px]">
       <thead>
         <tr className="bg-slate-50 border-b border-red-100">
           {head.map((h, i) => <th key={i} className="text-left font-medium text-slate-500 text-xs uppercase tracking-wide px-4 py-2.5 f-body">{h}</th>)}
@@ -468,6 +553,7 @@ export default function App() {
   const [notifOpen, setNotifOpen] = useState(false);
   const [roleOpen, setRoleOpen] = useState(false);
   const [modal, setModal] = useState(null); // {type, payload}
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState(null);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2600); };
@@ -629,6 +715,43 @@ export default function App() {
     const paid = inv.filter((i) => i.status !== "Rejected").reduce((s, i) => s + i.paid, 0);
     return { deals: myDeals, earnings, paid, outstanding: earnings - paid };
   };
+
+  /* ---------- auto-generated notifications from real data (replaces the static table) ---------- */
+  const liveNotifications = useMemo(() => {
+    const items = [];
+    deliverablesWithJoins.forEach((d) => {
+      if (!["Live", "Completed"].includes(d.status) && isPast(d.due)) {
+        items.push({ id: `dlv-overdue-${d.id}`, text: `${d.type} for ${d.creator?.name} (${d.brand?.name}) is overdue`, severity: "high", created_at: d.due });
+      }
+    });
+    creatorInvoicesWithJoins.forEach((i) => {
+      if (i.status === "Pending Review") {
+        items.push({ id: `ci-pending-${i.id}`, text: `${i.creator?.name} invoice ${i.invoiceNumber} awaiting accounts approval`, severity: "medium", created_at: i.date });
+      }
+      if (i.status === "Rejected") {
+        items.push({ id: `ci-rejected-${i.id}`, text: `${i.creator?.name} invoice ${i.invoiceNumber} was rejected${i.rejectReason ? " — " + i.rejectReason : ""}`, severity: "high", created_at: i.date });
+      }
+    });
+    db.campaigns.forEach((c) => {
+      if (c.status === "Active" && c.end) {
+        const daysLeft = Math.ceil((new Date(c.end) - new Date()) / 86400000);
+        if (daysLeft >= 0 && daysLeft <= 14) {
+          items.push({ id: `camp-ending-${c.id}`, text: `${c.name} ends in ${daysLeft} day${daysLeft === 1 ? "" : "s"}`, severity: "low", created_at: todayISO() });
+        }
+      }
+    });
+    brandInvoicesWithJoins.forEach((b) => {
+      if (b.pending > 0 && isPast(b.dueDate)) {
+        items.push({ id: `bi-overdue-${b.id}`, text: `${b.brand?.name} invoice ${b.invoiceNumber} is overdue for payment`, severity: "medium", created_at: b.dueDate });
+      }
+      if (b.status === "Draft") {
+        items.push({ id: `bi-draft-${b.id}`, text: `${b.brand?.name} brand invoice is still a draft — not yet sent`, severity: "low", created_at: b.date || todayISO() });
+      }
+    });
+    return items
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .map((n) => ({ ...n, time: timeAgo(n.created_at) }));
+  }, [deliverablesWithJoins, creatorInvoicesWithJoins, brandInvoicesWithJoins, db.campaigns]);
 
   /* ---------- dashboard aggregates ---------- */
   const dash = useMemo(() => {
@@ -1004,17 +1127,23 @@ export default function App() {
     <div className="h-screen w-full flex bg-gradient-to-br from-rose-200 via-amber-100 to-emerald-200 f-body text-slate-800" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
       <FontStyles />
       {/* SIDEBAR */}
-      <aside className="w-56 shrink-0 bg-slate-950 text-slate-300 flex flex-col">
-        <div className="px-5 py-5 border-b border-red-900">
-          <RepCreatorsLogo />
-          <div className="text-[11px] text-slate-500 mt-1.5 tracking-wide uppercase">Operations Platform</div>
+      {sidebarOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 z-40 md:hidden" onClick={() => setSidebarOpen(false)} />
+      )}
+      <aside className={`w-56 shrink-0 bg-slate-950 text-slate-300 flex flex-col fixed md:static inset-y-0 left-0 z-50 transition-transform duration-200 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} md:translate-x-0`}>
+        <div className="px-5 py-5 border-b border-red-900 flex items-center justify-between">
+          <div>
+            <RepCreatorsLogo />
+            <div className="text-[11px] text-slate-500 mt-1.5 tracking-wide uppercase">Operations Platform</div>
+          </div>
+          <button onClick={() => setSidebarOpen(false)} className="md:hidden text-slate-400 hover:text-white"><X size={18} /></button>
         </div>
         <nav className="flex-1 py-3 overflow-y-auto">
           {nav.map((n) => {
             const Icon = n.icon;
             const active = activeModule === n.id;
             return (
-              <button key={n.id} onClick={() => goTo(n.id)} className={`w-full flex items-center gap-2.5 px-5 py-2.5 text-sm f-body transition-colors ${active ? "bg-slate-900 text-white border-r-2 border-red-500" : "text-slate-400 hover:text-white hover:bg-slate-900/60"}`}>
+              <button key={n.id} onClick={() => { goTo(n.id); setSidebarOpen(false); }} className={`w-full flex items-center gap-2.5 px-5 py-2.5 text-sm f-body transition-colors ${active ? "bg-slate-900 text-white border-r-2 border-red-500" : "text-slate-400 hover:text-white hover:bg-slate-900/60"}`}>
                 <Icon size={15} /> {n.label}
               </button>
             );
@@ -1028,22 +1157,26 @@ export default function App() {
       {/* MAIN */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* TOPBAR */}
-        <header className="h-14 shrink-0 bg-white border-b border-red-100 flex items-center gap-3 px-5">
+        <header className="h-14 shrink-0 bg-white border-b border-red-100 flex items-center gap-3 px-4 sm:px-5">
+          <button onClick={() => setSidebarOpen(true)} className="md:hidden p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg shrink-0">
+            <span className="block w-5 h-0.5 bg-slate-500 relative before:content-[''] before:absolute before:w-5 before:h-0.5 before:bg-slate-500 before:-translate-y-1.5 after:content-[''] after:absolute after:w-5 after:h-0.5 after:bg-slate-500 after:translate-y-1.5"></span>
+          </button>
           <div className="flex-1 max-w-md relative">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search brands, creators, campaigns, invoices…" className="w-full bg-slate-50 border border-red-100 rounded-lg pl-9 pr-3 py-1.5 text-sm f-body focus:outline-none focus:ring-2 focus:ring-red-200" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" className="w-full bg-slate-50 border border-red-100 rounded-lg pl-9 pr-3 py-1.5 text-sm f-body focus:outline-none focus:ring-2 focus:ring-red-200" />
           </div>
           <div className="flex-1" />
           <div className="relative">
             <button onClick={() => setNotifOpen((o) => !o)} className="relative p-2 rounded-lg hover:bg-slate-100 text-slate-500">
               <Bell size={17} />
-              {db.notifications.length > 0 && <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-red-500 rounded-full" />}
+              {liveNotifications.length > 0 && <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-red-500 rounded-full" />}
             </button>
             {notifOpen && (
               <div className="absolute right-0 top-11 w-80 bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 shadow-lg z-40 overflow-hidden">
                 <div className="px-4 py-2.5 border-b border-red-50 font-medium text-sm f-display">Notifications</div>
                 <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
-                  {db.notifications.map((n) => (
+                  {liveNotifications.length === 0 && <div className="px-4 py-6 text-center text-sm text-slate-400 f-body">Nothing to flag right now.</div>}
+                  {liveNotifications.map((n) => (
                     <div key={n.id} className="px-4 py-2.5 flex gap-2 text-sm">
                       <span className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${n.severity === "high" ? "bg-red-500" : n.severity === "medium" ? "bg-amber-500" : "bg-slate-300"}`} />
                       <div>
@@ -1150,32 +1283,32 @@ function Dashboard({ dash, deliverablesWithJoins, creatorInvoicesWithJoins, bran
   return (
     <div>
       <SectionHeader title="Dashboard" />
-      <div className="grid grid-cols-4 gap-3 mb-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
         <KPICard label="Brand Receivables" value={inr(dash.brandReceivables)} tone="amber" icon={ArrowDownRight} sub={`${dash.brandPaymentsPending} invoices pending`} onClick={() => goTo("brandInvoices")} />
         <KPICard label="Creator Payables" value={inr(dash.creatorPayables)} tone="amber" icon={ArrowUpRight} sub={`${dash.creatorPaymentsPending} invoices pending`} onClick={() => goTo("creatorInvoices")} />
         <KPICard label="Revenue (Billed)" value={inr(dash.revenue)} tone="indigo" icon={CircleDollarSign} onClick={() => goTo("brandInvoices")} />
         <KPICard label="Creator Cost" value={inr(dash.creatorCost)} tone="slate" icon={Wallet} onClick={() => goTo("creatorInvoices")} />
       </div>
-      <div className="grid grid-cols-4 gap-3 mb-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
         <KPICard label="Expected Gross Profit" value={inr(dash.grossProfit)} tone="emerald" icon={BarChart3} sub={`${dash.revenue ? ((dash.grossProfit / dash.revenue) * 100).toFixed(0) : 0}% margin`} onClick={() => goTo("reports")} />
         <KPICard label="Payments Received" value={inr(dash.paymentsReceived)} tone="emerald" icon={ArrowDownRight} onClick={() => goTo("payments")} />
         <KPICard label="Payments Overdue" value={dash.paymentsOverdue} tone="red" icon={AlertTriangle} sub="brand invoices" onClick={() => goTo("brandInvoices")} />
         <KPICard label="Zoho Sync Failures" value={dash.zohoFailures} tone={dash.zohoFailures ? "red" : "slate"} icon={RefreshCw} onClick={() => goTo("creatorInvoices")} />
       </div>
-      <div className="grid grid-cols-4 gap-3 mb-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
         <KPICard label="Active Campaigns" value={dash.activeCampaigns} tone="emerald" icon={Briefcase} onClick={() => goTo("campaigns")} />
         <KPICard label="Upcoming Campaigns" value={dash.upcomingCampaigns} tone="indigo" icon={CalendarClock} onClick={() => goTo("campaigns")} />
         <KPICard label="Completed Campaigns" value={dash.completedCampaigns} tone="slate" icon={Check} onClick={() => goTo("campaigns")} />
         <KPICard label="Pending Deliverables" value={dash.pendingDeliverables} tone="amber" icon={ListChecks} onClick={() => goTo("deliverables")} />
       </div>
-      <div className="grid grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <KPICard label="Awaiting Approval" value={dash.awaitingApproval} tone="amber" icon={Clock} onClick={() => goTo("deliverables")} />
         <KPICard label="Scheduled Videos" value={dash.scheduledVideos} tone="indigo" icon={CalendarClock} onClick={() => goTo("deliverables")} />
         <KPICard label="Going Live This Week" value={dash.liveThisWeek} tone="emerald" icon={ArrowUpRight} onClick={() => goTo("deliverables")} />
         <KPICard label="Overdue Deliverables" value={dash.overdueDeliverables} tone="red" icon={AlertTriangle} onClick={() => goTo("deliverables")} />
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <DashList title="Overdue Deliverables" icon={AlertTriangle} tone="red" items={overdueList} empty="Nothing overdue — good shape." render={(d) => (
           <div onClick={() => goTo("campaigns", d.campaign?.id)} className="cursor-pointer">
             <div className="text-sm text-slate-700 f-body">{d.creator?.name} · {d.type}</div>
@@ -1272,7 +1405,7 @@ function BrandDetail({ brand, totals, dealsWithJoins, brandInvoicesWithJoins, do
           <Btn variant="danger" size="sm" icon={XCircle} onClick={() => onDelete(brand.id)}>Delete Brand</Btn>
         </div>
       } />
-      <div className="grid grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
         <KPICard label="Total Business" value={inr(totals.invoiced)} tone="indigo" />
         <KPICard label="Amount Received" value={inr(totals.received)} tone="emerald" />
         <KPICard label="Outstanding" value={inr(totals.outstanding)} tone="amber" />
@@ -1280,7 +1413,7 @@ function BrandDetail({ brand, totals, dealsWithJoins, brandInvoicesWithJoins, do
       </div>
       <Tabs tab={tab} setTab={setTab} tabs={["overview", "campaigns", "invoices", "documents"]} />
       {tab === "overview" && (
-        <div className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-5 grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
+        <div className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-5 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 text-sm">
           <InfoRow label="POC" value={brand.poc} />
           <InfoRow label="Email" value={brand.email} />
           <InfoRow label="Phone" value={brand.phone} />
@@ -1364,7 +1497,7 @@ function CreatorDetail({ creator, totals, invoices, deliverablesWithJoins, docum
           <Btn variant="danger" size="sm" icon={XCircle} onClick={() => onDelete(creator.id)}>Delete Creator</Btn>
         </div>
       } />
-      <div className="grid grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
         <KPICard label="Total Earnings" value={inr(totals.earnings)} tone="indigo" />
         <KPICard label="Paid" value={inr(totals.paid)} tone="emerald" />
         <KPICard label="Outstanding" value={inr(totals.outstanding)} tone="amber" />
@@ -1372,7 +1505,7 @@ function CreatorDetail({ creator, totals, invoices, deliverablesWithJoins, docum
       </div>
       <Tabs tab={tab} setTab={setTab} tabs={["overview", "social", "campaigns", "invoices", "documents"]} />
       {tab === "overview" && (
-        <div className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-5 grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
+        <div className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-5 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 text-sm">
           <InfoRow label="Handle" value={`${creator.handle} · ${creator.platform}`} />
           <InfoRow label="Phone" value={creator.phone} />
           <InfoRow label="Email" value={creator.email} />
@@ -1460,7 +1593,7 @@ function CampaignDetail({ campaign, brand, deals, deliverablesWithJoins, brandIn
           {role !== "creator" && <Btn variant="danger" size="sm" icon={XCircle} onClick={() => onDeleteCampaign(campaign.id)}>Delete Campaign</Btn>}
         </div>
       } />
-      <div className="grid grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
         <KPICard label="Revenue" value={inr(financials.revenue)} tone="indigo" />
         <KPICard label="Creator Cost" value={inr(financials.creatorCost)} tone="slate" />
         <KPICard label="Expected Profit" value={inr(financials.profit)} tone={financials.profit >= 0 ? "emerald" : "red"} />
@@ -1468,7 +1601,7 @@ function CampaignDetail({ campaign, brand, deals, deliverablesWithJoins, brandIn
       </div>
       <Tabs tab={tab} setTab={setTab} tabs={["overview", "deals", "deliverables", role !== "creator" ? "brand invoice" : null].filter(Boolean)} />
       {tab === "overview" && (
-        <div className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-5 grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
+        <div className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-5 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 text-sm">
           <InfoRow label="Brand" value={<button onClick={() => goTo("brands", brand?.id)} className="text-red-600 hover:underline">{brand?.name}</button>} />
           <InfoRow label="POC" value={campaign.poc} />
           <InfoRow label="Start / End" value={`${fmtDate(campaign.start)} – ${fmtDate(campaign.end)}`} />
@@ -1697,6 +1830,7 @@ function CreatorInvoicesModule({ rows, onApprove, onReject, onRetrySync, onRecor
                 {i.status === "Approved" && i.pending > 0 && role !== "creator" && (
                   <Btn size="sm" variant="secondary" onClick={() => setPayModal(i)}>Record Payment</Btn>
                 )}
+                <Btn size="sm" variant="secondary" onClick={() => downloadCreatorInvoicePDF(i)}>Download PDF</Btn>
               </div>
             </Td>
           </Tr>
@@ -1729,7 +1863,12 @@ function BrandInvoicesModule({ rows, onRecordPayment, onCreate, goTo }) {
             <Td className={isPast(i.dueDate) && i.pending > 0 ? "text-red-600" : ""}>{fmtDate(i.dueDate)}</Td>
             <Td><Badge tone={statusTone(i.status)}>{i.status}</Badge></Td>
             <Td><Badge tone={statusTone(i.zoho)}>{i.zoho}</Badge></Td>
-            <Td>{i.pending > 0 && <Btn size="sm" variant="secondary" onClick={() => setPayModal(i)}>Record Payment</Btn>}</Td>
+            <Td>
+              <div className="flex gap-1.5 flex-wrap">
+                {i.pending > 0 && <Btn size="sm" variant="secondary" onClick={() => setPayModal(i)}>Record Payment</Btn>}
+                <Btn size="sm" variant="secondary" onClick={() => downloadBrandInvoicePDF(i)}>Download PDF</Btn>
+              </div>
+            </Td>
           </Tr>
         ))}
       </Table>
@@ -1805,13 +1944,13 @@ function ReportsModule({ db, campaigns, campaignFinancials, deliverablesWithJoin
   return (
     <div>
       <SectionHeader title="Financial / Profitability Reports" />
-      <div className="grid grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
         <KPICard label="Brand Receivables" value={inr(totalReceivable)} tone="amber" />
         <KPICard label="Overdue Receivables" value={inr(overdueReceivable)} tone="red" />
         <KPICard label="Creator Payables" value={inr(totalPayable)} tone="amber" />
         <KPICard label="Overdue Creator Payments" value={inr(overduePayable)} tone="red" />
       </div>
-      <div className="grid grid-cols-2 gap-4 mb-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
         <div className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-4">
           <div className="f-display text-sm font-medium text-slate-700 mb-3">Revenue vs Creator Cost vs Profit, by Campaign</div>
           <ResponsiveContainer width="100%" height={260}>
@@ -1932,13 +2071,13 @@ function CreatorHome({ creator, totals, deliverablesWithJoins, invoices, goTo })
   return (
     <div>
       <SectionHeader title={`Welcome, ${creator.name}`} />
-      <div className="grid grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <KPICard label="Total Earnings" value={inr(totals.earnings)} tone="indigo" />
         <KPICard label="Paid" value={inr(totals.paid)} tone="emerald" />
         <KPICard label="Outstanding" value={inr(totals.outstanding)} tone="amber" />
         <KPICard label="Active Campaigns" value={[...new Set(totals.deals.filter(d => d.status === "Active").map(d => d.campaignId))].length} tone="slate" />
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-4">
           <div className="f-display text-sm font-medium text-slate-700 mb-3">My Pending Deliverables</div>
           {pendingDeliverables.length === 0 ? <EmptyState text="You're all caught up." /> : (
