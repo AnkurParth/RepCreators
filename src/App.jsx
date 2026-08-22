@@ -859,6 +859,29 @@ export default function App() {
     if (error) { showToast("Failed to update stages: " + error.message); return; }
     fetchAllData();
   };
+  const addDocument = async (entityType, entityId, file) => {
+    const path = `${entityType}/${entityId}/${Date.now()}-${file.name}`;
+    const { error: upErr } = await supabase.storage.from("documents").upload(path, file);
+    if (upErr) { showToast("Upload failed: " + upErr.message); return; }
+    const { error: insErr } = await supabase.from("documents").insert({
+      entity_type: entityType, entity_id: entityId, file_name: file.name,
+      file_type: file.type || file.name.split(".").pop(), upload_date: todayISO(),
+      uploaded_by: auth?.displayName || auth?.email || "Unknown", storage_path: path,
+    });
+    if (insErr) { showToast("Failed to save document record: " + insErr.message); return; }
+    showToast("Document uploaded");
+    fetchAllData();
+  };
+  const deleteDocument = async (doc) => {
+    if (!confirm(`Delete "${doc.fileName}"? This cannot be undone.`)) return;
+    if (doc.storagePath) {
+      await supabase.storage.from("documents").remove([doc.storagePath]);
+    }
+    const { error } = await supabase.from("documents").delete().eq("id", doc.id);
+    if (error) { showToast("Failed to delete document: " + error.message); return; }
+    showToast("Document deleted");
+    fetchAllData();
+  };
 
   /* ---------- global search ---------- */
   const searchResults = useMemo(() => {
@@ -1028,10 +1051,10 @@ export default function App() {
               {activeModule === "dashboard" && role === "creator" && <CreatorHome creatorId={demoCreatorId} creator={creatorById(demoCreatorId)} totals={creatorTotals(demoCreatorId)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.creator?.id === demoCreatorId)} invoices={creatorInvoicesWithJoins.filter((i) => i.creator?.id === demoCreatorId)} goTo={goTo} />}
 
               {activeModule === "brands" && !sel.brand && <BrandsList brands={db.brands} brandTotals={brandTotals} goTo={goTo} onAdd={() => setModal({ type: "addBrand" })} />}
-              {activeModule === "brands" && sel.brand && <BrandDetail brand={brandById(sel.brand)} totals={brandTotals(sel.brand)} dealsWithJoins={dealsWithJoins} brandInvoicesWithJoins={brandInvoicesWithJoins.filter((b) => b.brand?.id === sel.brand)} documents={db.documents.filter((d) => d.entityType === "brand" && d.entityId === sel.brand)} goTo={goTo} back={() => setSel((s) => ({ ...s, brand: null }))} onDelete={deleteBrand} />}
+              {activeModule === "brands" && sel.brand && <BrandDetail brand={brandById(sel.brand)} totals={brandTotals(sel.brand)} dealsWithJoins={dealsWithJoins} brandInvoicesWithJoins={brandInvoicesWithJoins.filter((b) => b.brand?.id === sel.brand)} documents={db.documents.filter((d) => d.entityType === "brand" && d.entityId === sel.brand)} goTo={goTo} back={() => setSel((s) => ({ ...s, brand: null }))} onDelete={deleteBrand} onAddDocument={(entityType, entityId) => setModal({ type: "addDocument", entityType, entityId })} onDeleteDocument={deleteDocument} />}
 
               {activeModule === "creators" && !sel.creator && <CreatorsList creators={db.creators} creatorTotals={creatorTotals} goTo={goTo} onAdd={() => setModal({ type: "addCreator" })} role={role} />}
-              {activeModule === "creators" && sel.creator && <CreatorDetail creator={creatorById(sel.creator)} totals={creatorTotals(sel.creator)} invoices={creatorInvoicesWithJoins.filter((i) => i.creator?.id === sel.creator)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.creator?.id === sel.creator)} documents={db.documents.filter((d) => d.entityType === "creator" && d.entityId === sel.creator)} goTo={goTo} back={() => setSel((s) => ({ ...s, creator: null }))} onDelete={deleteCreator} onSaveSocials={updateCreatorSocials} />}
+              {activeModule === "creators" && sel.creator && <CreatorDetail creator={creatorById(sel.creator)} totals={creatorTotals(sel.creator)} invoices={creatorInvoicesWithJoins.filter((i) => i.creator?.id === sel.creator)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.creator?.id === sel.creator)} documents={db.documents.filter((d) => d.entityType === "creator" && d.entityId === sel.creator)} goTo={goTo} back={() => setSel((s) => ({ ...s, creator: null }))} onDelete={deleteCreator} onSaveSocials={updateCreatorSocials} onAddDocument={(entityType, entityId) => setModal({ type: "addDocument", entityType, entityId })} onDeleteDocument={deleteDocument} />}
 
               {activeModule === "campaigns" && !sel.campaign && role !== "creator" && <CampaignsList campaigns={db.campaigns} brandById={brandById} campaignFinancials={campaignFinancials} goTo={goTo} onAdd={() => setModal({ type: "addCampaign" })} />}
               {activeModule === "campaigns" && role === "creator" && (() => {
@@ -1065,6 +1088,7 @@ export default function App() {
       {modal?.type === "addCampaign" && <AddCampaignModal brands={db.brands} onClose={() => setModal(null)} onSave={(p) => { addCampaign(p); setModal(null); }} />}
       {modal?.type === "addDeal" && <AddDealModal creators={db.creators} campaignId={modal.campaignId} onClose={() => setModal(null)} onSave={(p) => { addDeal(p); setModal(null); }} />}
       {modal?.type === "addDeliverable" && <AddDeliverableModal deals={dealsWithJoins.filter((d) => d.campaignId === modal.campaignId)} onClose={() => setModal(null)} onSave={(p) => { addDeliverable(p); setModal(null); }} />}
+      {modal?.type === "addDocument" && <AddDocumentModal onClose={() => setModal(null)} onSave={(file) => { addDocument(modal.entityType, modal.entityId, file); setModal(null); }} />}
       {modal?.type === "submitInvoice" && <SubmitInvoiceModal deals={dealsWithJoins} onClose={() => setModal(null)} onSave={(p) => { submitCreatorInvoice(p); setModal(null); }} />}
       {modal?.type === "createBrandInvoice" && <CreateBrandInvoiceModal campaigns={db.campaigns} brandById={brandById} onClose={() => setModal(null)} onSave={(p) => { createBrandInvoice(p); setModal(null); }} />}
     </div>
@@ -1191,7 +1215,7 @@ function BrandsList({ brands, brandTotals, goTo, onAdd }) {
   );
 }
 
-function BrandDetail({ brand, totals, dealsWithJoins, brandInvoicesWithJoins, documents, goTo, back, onDelete }) {
+function BrandDetail({ brand, totals, dealsWithJoins, brandInvoicesWithJoins, documents, goTo, back, onDelete, onAddDocument, onDeleteDocument }) {
   const [tab, setTab] = useState("overview");
   if (!brand) return null;
   return (
@@ -1243,7 +1267,12 @@ function BrandDetail({ brand, totals, dealsWithJoins, brandInvoicesWithJoins, do
           ))}
         </Table>
       )}
-      {tab === "documents" && <DocsTable documents={documents} />}
+      {tab === "documents" && (
+        <div>
+          <div className="flex justify-end mb-3"><Btn size="sm" icon={Plus} onClick={() => onAddDocument("brand", brand.id)}>Add Document</Btn></div>
+          <DocsTable documents={documents} onDelete={onDeleteDocument} />
+        </div>
+      )}
     </div>
   );
 }
@@ -1272,7 +1301,7 @@ function CreatorsList({ creators, creatorTotals, goTo, onAdd, role }) {
   );
 }
 
-function CreatorDetail({ creator, totals, invoices, deliverablesWithJoins, documents, goTo, back, onDelete, onSaveSocials }) {
+function CreatorDetail({ creator, totals, invoices, deliverablesWithJoins, documents, goTo, back, onDelete, onSaveSocials, onAddDocument, onDeleteDocument }) {
   const [tab, setTab] = useState("overview");
   if (!creator) return null;
   const brandsWorked = [...new Set(totals.deals.map((d) => d.campaign?.brandId))].length;
@@ -1328,7 +1357,12 @@ function CreatorDetail({ creator, totals, invoices, deliverablesWithJoins, docum
           ))}
         </Table>
       )}
-      {tab === "documents" && <DocsTable documents={documents} />}
+      {tab === "documents" && (
+        <div>
+          <div className="flex justify-end mb-3"><Btn size="sm" icon={Plus} onClick={() => onAddDocument("creator", creator.id)}>Add Document</Btn></div>
+          <DocsTable documents={documents} onDelete={onDeleteDocument} />
+        </div>
+      )}
     </div>
   );
 }
@@ -1785,7 +1819,12 @@ function DocumentsModule({ documents, brandById, creatorById }) {
     </div>
   );
 }
-function DocsTable({ documents }) {
+function DocsTable({ documents, onDelete }) {
+  const viewUrl = (doc) => {
+    if (!doc.storagePath) return null;
+    const { data } = supabase.storage.from("documents").getPublicUrl(doc.storagePath);
+    return data?.publicUrl;
+  };
   return (
     <Table head={["File", "Type", "Uploaded By", "Date", ""]}>
       {documents.length === 0 && <tr><td colSpan={5}><EmptyState text="No documents uploaded." /></td></tr>}
@@ -1795,7 +1834,16 @@ function DocsTable({ documents }) {
           <Td muted>{d.fileType}</Td>
           <Td muted>{d.uploadedBy}</Td>
           <Td muted>{fmtDate(d.uploadDate)}</Td>
-          <Td><button className="text-red-600 hover:underline text-xs inline-flex items-center gap-1">View <ExternalLink size={11} /></button></Td>
+          <Td>
+            <div className="flex items-center gap-2">
+              {viewUrl(d) ? (
+                <a href={viewUrl(d)} target="_blank" rel="noreferrer" className="text-red-600 hover:underline text-xs inline-flex items-center gap-1">View <ExternalLink size={11} /></a>
+              ) : (
+                <span className="text-xs text-slate-300">No file</span>
+              )}
+              {onDelete && <button onClick={() => onDelete(d)} title="Delete"><XCircle size={14} className="text-slate-400 hover:text-red-600" /></button>}
+            </div>
+          </Td>
         </Tr>
       ))}
     </Table>
@@ -2144,6 +2192,31 @@ function AddDeliverableModal({ deals, onClose, onSave }) {
       <Field label="Brief"><input className={inputCls} value={f.brief} onChange={(e) => setF({ ...f, brief: e.target.value })} placeholder="e.g. Product walkthrough reel" /></Field>
       <Field label="Due Date"><input type="date" className={inputCls} value={f.due} onChange={(e) => setF({ ...f, due: e.target.value })} /></Field>
       <div className="flex justify-end gap-2 mt-3"><Btn onClick={() => f.dealId && f.brief && onSave(f)}>Add Deliverable</Btn></div>
+    </Modal>
+  );
+}
+function AddDocumentModal({ onClose, onSave }) {
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const handleSave = async () => {
+    if (!file) return;
+    setUploading(true);
+    await onSave(file);
+    setUploading(false);
+  };
+  return (
+    <Modal title="Add Document" onClose={onClose}>
+      <Field label="File">
+        <input
+          type="file"
+          onChange={(e) => setFile(e.target.files?.[0] || null)}
+          className="w-full text-sm f-body file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border file:border-red-100 file:bg-white file:text-slate-700 file:text-sm hover:file:bg-slate-50"
+        />
+      </Field>
+      {file && <div className="text-xs text-slate-400 f-body -mt-2 mb-3">{file.name} ({(file.size / 1024).toFixed(0)} KB)</div>}
+      <div className="flex justify-end gap-2 mt-3">
+        <Btn onClick={handleSave} disabled={!file || uploading}>{uploading ? "Uploading…" : "Upload Document"}</Btn>
+      </div>
     </Modal>
   );
 }
