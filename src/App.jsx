@@ -789,6 +789,30 @@ export default function App() {
     showToast(items.length > 0 ? `Deal added with ${items.length} deliverable${items.length > 1 ? "s" : ""} created` : "Deal added");
     fetchAllData();
   };
+  const updateDeal = async (id, payload) => {
+    const { error } = await supabase.from("deals").update({
+      creator_id: payload.creatorId, amount: payload.amount, scope: payload.scope,
+    }).eq("id", id);
+    if (error) { showToast("Failed to update deal: " + error.message); return; }
+
+    // Re-parse the (possibly changed) scope and top up any deliverables that
+    // don't exist yet for this deal — e.g. editing "1 Reel" up to "2 Reels"
+    // will add "Reel 2" without touching or duplicating the existing "Reel 1".
+    const { data: existing } = await supabase.from("deliverables").select("brief").eq("deal_id", id);
+    const existingBriefs = new Set((existing || []).map((d) => d.brief));
+    const items = parseScopeToDeliverables(payload.scope).filter((it) => !existingBriefs.has(it.brief));
+    if (items.length > 0) {
+      const dueDate = payload.dueDate || daysFromNow(14);
+      const rows = items.map((it) => ({
+        deal_id: id, type: it.type, brief: it.brief, due: dueDate,
+        status: "Brief", stages_done: [],
+      }));
+      const { error: dlvError } = await supabase.from("deliverables").insert(rows);
+      if (dlvError) { showToast("Deal updated, but adding new deliverables failed: " + dlvError.message); fetchAllData(); return; }
+    }
+    showToast(items.length > 0 ? `Deal updated — ${items.length} new deliverable${items.length > 1 ? "s" : ""} added` : "Deal updated");
+    fetchAllData();
+  };
   const addDeliverable = async (payload) => {
     const { error } = await supabase.from("deliverables").insert({
       deal_id: payload.dealId, type: payload.type, brief: payload.brief, due: payload.due,
@@ -1061,7 +1085,7 @@ export default function App() {
                 const myCampIds = [...new Set(dealsWithJoins.filter(d => d.creatorId === demoCreatorId).map(d => d.campaignId))];
                 return <CampaignsList campaigns={db.campaigns.filter(c => myCampIds.includes(c.id))} brandById={brandById} campaignFinancials={campaignFinancials} goTo={goTo} restricted />;
               })()}
-              {activeModule === "campaigns" && sel.campaign && <CampaignDetail campaign={campaignById(sel.campaign)} brand={brandById(campaignById(sel.campaign)?.brandId)} deals={dealsWithJoins.filter((d) => d.campaignId === sel.campaign)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.campaign?.id === sel.campaign)} brandInvoices={brandInvoicesWithJoins.filter((b) => b.campaignId === sel.campaign)} financials={campaignFinancials(sel.campaign)} goTo={goTo} back={() => setSel((s) => ({ ...s, campaign: null }))} onAddDeal={() => setModal({ type: "addDeal", campaignId: sel.campaign })} onAddDeliverable={() => setModal({ type: "addDeliverable", campaignId: sel.campaign })} onStatusChange={updateDeliverableStatus} onStagesChange={updateDeliverableStages} role={role} onDeleteCampaign={deleteCampaign} onDeleteDeal={deleteDeal} onDeleteDeliverable={deleteDeliverable} />}
+              {activeModule === "campaigns" && sel.campaign && <CampaignDetail campaign={campaignById(sel.campaign)} brand={brandById(campaignById(sel.campaign)?.brandId)} deals={dealsWithJoins.filter((d) => d.campaignId === sel.campaign)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.campaign?.id === sel.campaign)} brandInvoices={brandInvoicesWithJoins.filter((b) => b.campaignId === sel.campaign)} financials={campaignFinancials(sel.campaign)} goTo={goTo} back={() => setSel((s) => ({ ...s, campaign: null }))} onAddDeal={() => setModal({ type: "addDeal", campaignId: sel.campaign })} onEditDeal={(deal) => setModal({ type: "editDeal", deal })} onAddDeliverable={() => setModal({ type: "addDeliverable", campaignId: sel.campaign })} onStatusChange={updateDeliverableStatus} onStagesChange={updateDeliverableStages} role={role} onDeleteCampaign={deleteCampaign} onDeleteDeal={deleteDeal} onDeleteDeliverable={deleteDeliverable} />}
 
               {activeModule === "deliverables" && <DeliverablesModule rows={role === "creator" ? deliverablesWithJoins.filter(d => d.creator?.id === demoCreatorId) : deliverablesWithJoins} onStatusChange={updateDeliverableStatus} goTo={goTo} role={role} onDelete={deleteDeliverable} />}
 
@@ -1087,6 +1111,7 @@ export default function App() {
       {modal?.type === "addCreator" && <AddCreatorModal onClose={() => setModal(null)} onSave={(p) => { addCreator(p); setModal(null); }} />}
       {modal?.type === "addCampaign" && <AddCampaignModal brands={db.brands} onClose={() => setModal(null)} onSave={(p) => { addCampaign(p); setModal(null); }} />}
       {modal?.type === "addDeal" && <AddDealModal creators={db.creators} campaignId={modal.campaignId} onClose={() => setModal(null)} onSave={(p) => { addDeal(p); setModal(null); }} />}
+      {modal?.type === "editDeal" && <EditDealModal creators={db.creators} deal={modal.deal} onClose={() => setModal(null)} onSave={(p) => { updateDeal(modal.deal.id, p); setModal(null); }} />}
       {modal?.type === "addDeliverable" && <AddDeliverableModal deals={dealsWithJoins.filter((d) => d.campaignId === modal.campaignId)} onClose={() => setModal(null)} onSave={(p) => { addDeliverable(p); setModal(null); }} />}
       {modal?.type === "addDocument" && <AddDocumentModal onClose={() => setModal(null)} onSave={(file) => { addDocument(modal.entityType, modal.entityId, file); setModal(null); }} />}
       {modal?.type === "submitInvoice" && <SubmitInvoiceModal deals={dealsWithJoins} onClose={() => setModal(null)} onSave={(p) => { submitCreatorInvoice(p); setModal(null); }} />}
@@ -1393,7 +1418,7 @@ function CampaignsList({ campaigns, brandById, campaignFinancials, goTo, onAdd, 
   );
 }
 
-function CampaignDetail({ campaign, brand, deals, deliverablesWithJoins, brandInvoices, financials, goTo, back, onAddDeal, onAddDeliverable, onStatusChange, onStagesChange, role, onDeleteCampaign, onDeleteDeal, onDeleteDeliverable }) {
+function CampaignDetail({ campaign, brand, deals, deliverablesWithJoins, brandInvoices, financials, goTo, back, onAddDeal, onEditDeal, onAddDeliverable, onStatusChange, onStagesChange, role, onDeleteCampaign, onDeleteDeal, onDeleteDeliverable }) {
   const [tab, setTab] = useState("overview");
   if (!campaign) return null;
   return (
@@ -1432,7 +1457,14 @@ function CampaignDetail({ campaign, brand, deals, deliverablesWithJoins, brandIn
                 <Td mono>{inr(d.amount)}</Td>
                 <Td><Badge tone={statusTone(d.status)}>{d.status}</Badge></Td>
                 <Td><Badge tone={statusTone(d.approval === "Approved" ? "Approved" : "Pending Review")}>{d.approval}</Badge></Td>
-                {role !== "creator" && <Td><button onClick={() => onDeleteDeal(d.id)} title="Delete deal"><XCircle size={15} className="text-slate-400 hover:text-red-600" /></button></Td>}
+                {role !== "creator" && (
+                  <Td>
+                    <div className="flex items-center gap-2">
+                      <Btn size="sm" variant="secondary" onClick={() => onEditDeal(d)}>Edit</Btn>
+                      <button onClick={() => onDeleteDeal(d.id)} title="Delete deal"><XCircle size={15} className="text-slate-400 hover:text-red-600" /></button>
+                    </div>
+                  </Td>
+                )}
               </Tr>
             ))}
           </Table>
@@ -1798,10 +1830,16 @@ function ReportsModule({ db, campaigns, campaignFinancials, deliverablesWithJoin
 
 /* ============================== DOCUMENTS ============================== */
 function DocumentsModule({ documents, brandById, creatorById }) {
+  const viewUrl = (doc) => {
+    if (!doc.storagePath) return null;
+    const { data } = supabase.storage.from("documents").getPublicUrl(doc.storagePath);
+    return data?.publicUrl;
+  };
   return (
     <div>
       <SectionHeader title="Documents" />
       <Table head={["File", "Type", "Linked To", "Uploaded By", "Date", ""]}>
+        {documents.length === 0 && <tr><td colSpan={6}><EmptyState text="No documents uploaded yet." /></td></tr>}
         {documents.map((d) => {
           const owner = d.entityType === "brand" ? brandById(d.entityId)?.name : creatorById(d.entityId)?.name;
           return (
@@ -1811,7 +1849,13 @@ function DocumentsModule({ documents, brandById, creatorById }) {
               <Td muted>{owner} ({d.entityType})</Td>
               <Td muted>{d.uploadedBy}</Td>
               <Td muted>{fmtDate(d.uploadDate)}</Td>
-              <Td><button className="text-red-600 hover:underline text-xs inline-flex items-center gap-1">View <ExternalLink size={11} /></button></Td>
+              <Td>
+                {viewUrl(d) ? (
+                  <a href={viewUrl(d)} target="_blank" rel="noreferrer" className="text-red-600 hover:underline text-xs inline-flex items-center gap-1">View <ExternalLink size={11} /></a>
+                ) : (
+                  <span className="text-xs text-slate-300">No file</span>
+                )}
+              </Td>
             </Tr>
           );
         })}
@@ -2220,6 +2264,25 @@ function AddDocumentModal({ onClose, onSave }) {
     </Modal>
   );
 }
+function EditDealModal({ creators, deal, onClose, onSave }) {
+  const [f, setF] = useState({ creatorId: deal.creatorId, scope: deal.scope || "", amount: deal.amount || 0, dueDate: daysFromNow(14) });
+  const preview = parseScopeToDeliverables(f.scope);
+  return (
+    <Modal title="Edit Deal" onClose={onClose}>
+      <Field label="Creator"><select className={inputCls} value={f.creatorId} onChange={(e) => setF({ ...f, creatorId: e.target.value })}>{creators.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
+      <Field label="Scope (e.g. 2 Reels + 1 Story)"><input className={inputCls} value={f.scope} onChange={(e) => setF({ ...f, scope: e.target.value })} /></Field>
+      {preview.length > 0 && (
+        <div className="text-xs text-slate-500 f-body -mt-2 mb-3 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-2">
+          Expected deliverables: {preview.map((p) => p.brief).join(", ")}. Any that don't already exist yet will be created — existing ones are left untouched.
+        </div>
+      )}
+      <Field label="Amount (₹)"><input type="number" className={inputCls} value={f.amount} onChange={(e) => setF({ ...f, amount: Number(e.target.value) })} /></Field>
+      <Field label="Due Date for any newly-added deliverables"><input type="date" className={inputCls} value={f.dueDate} onChange={(e) => setF({ ...f, dueDate: e.target.value })} /></Field>
+      <div className="flex justify-end gap-2 mt-3"><Btn onClick={() => onSave(f)}>Save Changes</Btn></div>
+    </Modal>
+  );
+}
+
 function SubmitInvoiceModal({ deals, onClose, onSave }) {
   const [f, setF] = useState({ dealId: deals[0]?.id, invoiceNumber: "", date: todayISO(), amount: 0, dueDate: daysFromNow(30) });
   const gst = Math.round(f.amount * 0.18);
