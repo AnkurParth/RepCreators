@@ -745,6 +745,15 @@ export default function App() {
     showToast("Brand created");
     fetchAllData();
   };
+  const updateBrand = async (id, payload) => {
+    const { error } = await supabase.from("brands").update({
+      name: payload.name, poc: payload.poc, email: payload.email, phone: payload.phone,
+      payment_terms: payload.paymentTerms, notes: payload.notes, industry: payload.industry,
+    }).eq("id", id);
+    if (error) { showToast("Failed to update brand: " + error.message); return; }
+    showToast("Brand updated");
+    fetchAllData();
+  };
   const addCreator = async (payload) => {
     const { error } = await supabase.from("creators").insert({
       name: payload.name, handle: payload.handle, platform: payload.platform, phone: payload.phone,
@@ -753,6 +762,16 @@ export default function App() {
     });
     if (error) { showToast("Failed to add creator: " + error.message); return; }
     showToast("Creator added");
+    fetchAllData();
+  };
+  const updateCreator = async (id, payload) => {
+    const { error } = await supabase.from("creators").update({
+      name: payload.name, handle: payload.handle, platform: payload.platform, phone: payload.phone,
+      email: payload.email, gst: payload.gst, pan: payload.pan, standard: payload.standard,
+      bank_name: payload.bank?.name, bank_acc: payload.bank?.acc, bank_ifsc: payload.bank?.ifsc,
+    }).eq("id", id);
+    if (error) { showToast("Failed to update creator: " + error.message); return; }
+    showToast("Creator updated");
     fetchAllData();
   };
   const addCampaign = async (payload) => {
@@ -1075,10 +1094,10 @@ export default function App() {
               {activeModule === "dashboard" && role === "creator" && <CreatorHome creatorId={demoCreatorId} creator={creatorById(demoCreatorId)} totals={creatorTotals(demoCreatorId)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.creator?.id === demoCreatorId)} invoices={creatorInvoicesWithJoins.filter((i) => i.creator?.id === demoCreatorId)} goTo={goTo} />}
 
               {activeModule === "brands" && !sel.brand && <BrandsList brands={db.brands} brandTotals={brandTotals} goTo={goTo} onAdd={() => setModal({ type: "addBrand" })} />}
-              {activeModule === "brands" && sel.brand && <BrandDetail brand={brandById(sel.brand)} totals={brandTotals(sel.brand)} dealsWithJoins={dealsWithJoins} brandInvoicesWithJoins={brandInvoicesWithJoins.filter((b) => b.brand?.id === sel.brand)} documents={db.documents.filter((d) => d.entityType === "brand" && d.entityId === sel.brand)} goTo={goTo} back={() => setSel((s) => ({ ...s, brand: null }))} onDelete={deleteBrand} onAddDocument={(entityType, entityId) => setModal({ type: "addDocument", entityType, entityId })} onDeleteDocument={deleteDocument} />}
+              {activeModule === "brands" && sel.brand && <BrandDetail brand={brandById(sel.brand)} totals={brandTotals(sel.brand)} dealsWithJoins={dealsWithJoins} brandInvoicesWithJoins={brandInvoicesWithJoins.filter((b) => b.brand?.id === sel.brand)} documents={db.documents.filter((d) => d.entityType === "brand" && d.entityId === sel.brand)} goTo={goTo} back={() => setSel((s) => ({ ...s, brand: null }))} onDelete={deleteBrand} onEdit={(brand) => setModal({ type: "editBrand", brand })} onAddDocument={(entityType, entityId) => setModal({ type: "addDocument", entityType, entityId })} onDeleteDocument={deleteDocument} />}
 
               {activeModule === "creators" && !sel.creator && <CreatorsList creators={db.creators} creatorTotals={creatorTotals} goTo={goTo} onAdd={() => setModal({ type: "addCreator" })} role={role} />}
-              {activeModule === "creators" && sel.creator && <CreatorDetail creator={creatorById(sel.creator)} totals={creatorTotals(sel.creator)} invoices={creatorInvoicesWithJoins.filter((i) => i.creator?.id === sel.creator)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.creator?.id === sel.creator)} documents={db.documents.filter((d) => d.entityType === "creator" && d.entityId === sel.creator)} goTo={goTo} back={() => setSel((s) => ({ ...s, creator: null }))} onDelete={deleteCreator} onSaveSocials={updateCreatorSocials} onAddDocument={(entityType, entityId) => setModal({ type: "addDocument", entityType, entityId })} onDeleteDocument={deleteDocument} />}
+              {activeModule === "creators" && sel.creator && <CreatorDetail creator={creatorById(sel.creator)} totals={creatorTotals(sel.creator)} invoices={creatorInvoicesWithJoins.filter((i) => i.creator?.id === sel.creator)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.creator?.id === sel.creator)} documents={db.documents.filter((d) => d.entityType === "creator" && d.entityId === sel.creator)} goTo={goTo} back={() => setSel((s) => ({ ...s, creator: null }))} onDelete={deleteCreator} onEdit={(creator) => setModal({ type: "editCreator", creator })} onSaveSocials={updateCreatorSocials} onAddDocument={(entityType, entityId) => setModal({ type: "addDocument", entityType, entityId })} onDeleteDocument={deleteDocument} />}
 
               {activeModule === "campaigns" && !sel.campaign && role !== "creator" && <CampaignsList campaigns={db.campaigns} brandById={brandById} campaignFinancials={campaignFinancials} goTo={goTo} onAdd={() => setModal({ type: "addCampaign" })} />}
               {activeModule === "campaigns" && role === "creator" && (() => {
@@ -1108,7 +1127,9 @@ export default function App() {
 
       {/* MODALS */}
       {modal?.type === "addBrand" && <AddBrandModal onClose={() => setModal(null)} onSave={(p) => { addBrand(p); setModal(null); }} />}
+      {modal?.type === "editBrand" && <EditBrandModal brand={modal.brand} onClose={() => setModal(null)} onSave={(p) => { updateBrand(modal.brand.id, p); setModal(null); }} />}
       {modal?.type === "addCreator" && <AddCreatorModal onClose={() => setModal(null)} onSave={(p) => { addCreator(p); setModal(null); }} />}
+      {modal?.type === "editCreator" && <EditCreatorModal creator={modal.creator} onClose={() => setModal(null)} onSave={(p) => { updateCreator(modal.creator.id, p); setModal(null); }} />}
       {modal?.type === "addCampaign" && <AddCampaignModal brands={db.brands} onClose={() => setModal(null)} onSave={(p) => { addCampaign(p); setModal(null); }} />}
       {modal?.type === "addDeal" && <AddDealModal creators={db.creators} campaignId={modal.campaignId} onClose={() => setModal(null)} onSave={(p) => { addDeal(p); setModal(null); }} />}
       {modal?.type === "editDeal" && <EditDealModal creators={db.creators} deal={modal.deal} onClose={() => setModal(null)} onSave={(p) => { updateDeal(modal.deal.id, p); setModal(null); }} />}
@@ -1240,12 +1261,17 @@ function BrandsList({ brands, brandTotals, goTo, onAdd }) {
   );
 }
 
-function BrandDetail({ brand, totals, dealsWithJoins, brandInvoicesWithJoins, documents, goTo, back, onDelete, onAddDocument, onDeleteDocument }) {
+function BrandDetail({ brand, totals, dealsWithJoins, brandInvoicesWithJoins, documents, goTo, back, onDelete, onEdit, onAddDocument, onDeleteDocument }) {
   const [tab, setTab] = useState("overview");
   if (!brand) return null;
   return (
     <div>
-      <SectionHeader title={brand.name} crumbs={[{ label: "Brands", onClick: back }, { label: brand.name }]} action={<Btn variant="danger" size="sm" icon={XCircle} onClick={() => onDelete(brand.id)}>Delete Brand</Btn>} />
+      <SectionHeader title={brand.name} crumbs={[{ label: "Brands", onClick: back }, { label: brand.name }]} action={
+        <div className="flex items-center gap-2">
+          <Btn variant="secondary" size="sm" onClick={() => onEdit(brand)}>Edit Brand</Btn>
+          <Btn variant="danger" size="sm" icon={XCircle} onClick={() => onDelete(brand.id)}>Delete Brand</Btn>
+        </div>
+      } />
       <div className="grid grid-cols-4 gap-3 mb-5">
         <KPICard label="Total Business" value={inr(totals.invoiced)} tone="indigo" />
         <KPICard label="Amount Received" value={inr(totals.received)} tone="emerald" />
@@ -1326,13 +1352,18 @@ function CreatorsList({ creators, creatorTotals, goTo, onAdd, role }) {
   );
 }
 
-function CreatorDetail({ creator, totals, invoices, deliverablesWithJoins, documents, goTo, back, onDelete, onSaveSocials, onAddDocument, onDeleteDocument }) {
+function CreatorDetail({ creator, totals, invoices, deliverablesWithJoins, documents, goTo, back, onDelete, onEdit, onSaveSocials, onAddDocument, onDeleteDocument }) {
   const [tab, setTab] = useState("overview");
   if (!creator) return null;
   const brandsWorked = [...new Set(totals.deals.map((d) => d.campaign?.brandId))].length;
   return (
     <div>
-      <SectionHeader title={creator.name} crumbs={[{ label: "Creators", onClick: back }, { label: creator.name }]} action={<Btn variant="danger" size="sm" icon={XCircle} onClick={() => onDelete(creator.id)}>Delete Creator</Btn>} />
+      <SectionHeader title={creator.name} crumbs={[{ label: "Creators", onClick: back }, { label: creator.name }]} action={
+        <div className="flex items-center gap-2">
+          <Btn variant="secondary" size="sm" onClick={() => onEdit(creator)}>Edit Creator</Btn>
+          <Btn variant="danger" size="sm" icon={XCircle} onClick={() => onDelete(creator.id)}>Delete Creator</Btn>
+        </div>
+      } />
       <div className="grid grid-cols-4 gap-3 mb-5">
         <KPICard label="Total Earnings" value={inr(totals.earnings)} tone="indigo" />
         <KPICard label="Paid" value={inr(totals.paid)} tone="emerald" />
@@ -2177,6 +2208,49 @@ function AddCreatorModal({ onClose, onSave }) {
         <Field label="Standard Commercials"><input className={inputCls} value={f.standard} onChange={set("standard")} /></Field>
       </div>
       <div className="flex justify-end gap-2 mt-3"><Btn onClick={() => f.name && onSave(f)}>Save Creator</Btn></div>
+    </Modal>
+  );
+}
+function EditBrandModal({ brand, onClose, onSave }) {
+  const [f, setF] = useState({ name: brand.name || "", poc: brand.poc || "", email: brand.email || "", phone: brand.phone || "", paymentTerms: brand.paymentTerms || "Net 30", industry: brand.industry || "", notes: brand.notes || "" });
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  return (
+    <Modal title="Edit Brand" onClose={onClose}>
+      <Field label="Brand Name"><input className={inputCls} value={f.name} onChange={set("name")} /></Field>
+      <Field label="POC Name"><input className={inputCls} value={f.poc} onChange={set("poc")} /></Field>
+      <Field label="Email"><input className={inputCls} value={f.email} onChange={set("email")} /></Field>
+      <Field label="Phone"><input className={inputCls} value={f.phone} onChange={set("phone")} /></Field>
+      <Field label="Payment Terms"><input className={inputCls} value={f.paymentTerms} onChange={set("paymentTerms")} /></Field>
+      <Field label="Industry"><input className={inputCls} value={f.industry} onChange={set("industry")} /></Field>
+      <Field label="Notes"><textarea className={inputCls} rows={2} value={f.notes} onChange={set("notes")} /></Field>
+      <div className="flex justify-end gap-2 mt-3"><Btn onClick={() => f.name && onSave(f)}>Save Changes</Btn></div>
+    </Modal>
+  );
+}
+function EditCreatorModal({ creator, onClose, onSave }) {
+  const [f, setF] = useState({
+    name: creator.name || "", handle: creator.handle || "", platform: creator.platform || "",
+    phone: creator.phone || "", email: creator.email || "", gst: creator.gst || "", pan: creator.pan || "",
+    standard: creator.standard || "", bank: { name: creator.bank?.name || "", acc: creator.bank?.acc || "", ifsc: creator.bank?.ifsc || "" },
+  });
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const setBank = (k) => (e) => setF({ ...f, bank: { ...f.bank, [k]: e.target.value } });
+  return (
+    <Modal title="Edit Creator" onClose={onClose} wide>
+      <div className="grid grid-cols-2 gap-x-4">
+        <Field label="Name"><input className={inputCls} value={f.name} onChange={set("name")} /></Field>
+        <Field label="Handle"><input className={inputCls} value={f.handle} onChange={set("handle")} /></Field>
+        <Field label="Platform"><input className={inputCls} value={f.platform} onChange={set("platform")} /></Field>
+        <Field label="Phone"><input className={inputCls} value={f.phone} onChange={set("phone")} /></Field>
+        <Field label="Email"><input className={inputCls} value={f.email} onChange={set("email")} /></Field>
+        <Field label="GST"><input className={inputCls} value={f.gst} onChange={set("gst")} /></Field>
+        <Field label="PAN"><input className={inputCls} value={f.pan} onChange={set("pan")} /></Field>
+        <Field label="Standard Commercials"><input className={inputCls} value={f.standard} onChange={set("standard")} /></Field>
+        <Field label="Bank Account Name"><input className={inputCls} value={f.bank.name} onChange={setBank("name")} /></Field>
+        <Field label="Bank Account Number"><input className={inputCls} value={f.bank.acc} onChange={setBank("acc")} /></Field>
+        <Field label="Bank IFSC"><input className={inputCls} value={f.bank.ifsc} onChange={setBank("ifsc")} /></Field>
+      </div>
+      <div className="flex justify-end gap-2 mt-3"><Btn onClick={() => f.name && onSave(f)}>Save Changes</Btn></div>
     </Modal>
   );
 }
