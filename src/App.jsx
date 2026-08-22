@@ -72,7 +72,7 @@ const mapDeal = (r) => ({
 const mapDeliverable = (r) => ({
   id: r.id, dealId: r.deal_id, type: r.type, brief: r.brief, due: r.due,
   status: r.status, scheduled: r.scheduled, live: r.live, completed: r.completed,
-  revisionNotes: r.revision_notes, stage: r.stage || "Briefing",
+  revisionNotes: r.revision_notes, stagesDone: r.stages_done || [],
 });
 const mapCreatorInvoice = (r) => ({
   id: r.id, dealId: r.deal_id, invoiceNumber: r.invoice_number, date: r.date,
@@ -280,12 +280,13 @@ function LoginScreen() {
     }
     setLoading(true);
     setError("");
-    const { data, error: signUpError } = await supabase.auth.signUp({
+    const { error: signUpError } = await supabase.auth.signUp({
       email: email.trim(),
       password,
+      options: { data: { display_name: displayName.trim() } },
     });
+    setLoading(false);
     if (signUpError) {
-      setLoading(false);
       // Supabase phrases "already registered" a few different ways —
       // show a calm, professional message either way.
       if (/already registered|already exists|user already/i.test(signUpError.message || "")) {
@@ -295,25 +296,10 @@ function LoginScreen() {
       }
       return;
     }
-    // Create a matching profiles row with role "pending" — this user has no
-    // dashboard access until an admin changes their role in Supabase.
-    // Note: if email confirmation is still enabled in Supabase, there is no
-    // active session yet at this point, so this insert may be blocked by
-    // RLS. We treat that as a normal, expected state — not an error — since
-    // the account still exists and just needs admin approval.
-    if (data?.user) {
-      const { error: profileError } = await supabase.from("profiles").insert({
-        id: data.user.id,
-        display_name: displayName.trim(),
-        role: "pending",
-      });
-      if (profileError) {
-        setLoading(false);
-        setMode("signupSuccess");
-        return;
-      }
-    }
-    setLoading(false);
+    // A database trigger (see auto_create_profile.sql) creates the matching
+    // `profiles` row automatically, server-side, with role "pending" — this
+    // happens regardless of whether email confirmation is required, so it's
+    // reliable even without an active browser session at this point.
     setMode("signupSuccess");
   };
 
@@ -819,9 +805,9 @@ export default function App() {
     showToast("Social links updated");
     fetchAllData();
   };
-  const updateDeliverableStage = async (id, stage) => {
-    const { error } = await supabase.from("deliverables").update({ stage }).eq("id", id);
-    if (error) { showToast("Failed to update stage: " + error.message); return; }
+  const updateDeliverableStages = async (id, stagesDone) => {
+    const { error } = await supabase.from("deliverables").update({ stages_done: stagesDone }).eq("id", id);
+    if (error) { showToast("Failed to update stages: " + error.message); return; }
     fetchAllData();
   };
 
@@ -996,14 +982,14 @@ export default function App() {
               {activeModule === "brands" && sel.brand && <BrandDetail brand={brandById(sel.brand)} totals={brandTotals(sel.brand)} dealsWithJoins={dealsWithJoins} brandInvoicesWithJoins={brandInvoicesWithJoins.filter((b) => b.brand?.id === sel.brand)} documents={db.documents.filter((d) => d.entityType === "brand" && d.entityId === sel.brand)} goTo={goTo} back={() => setSel((s) => ({ ...s, brand: null }))} onDelete={deleteBrand} />}
 
               {activeModule === "creators" && !sel.creator && <CreatorsList creators={db.creators} creatorTotals={creatorTotals} goTo={goTo} onAdd={() => setModal({ type: "addCreator" })} role={role} />}
-              {activeModule === "creators" && sel.creator && <CreatorDetail creator={creatorById(sel.creator)} totals={creatorTotals(sel.creator)} invoices={creatorInvoicesWithJoins.filter((i) => i.creator?.id === sel.creator)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.creator?.id === sel.creator)} documents={db.documents.filter((d) => d.entityType === "creator" && d.entityId === sel.creator)} goTo={goTo} back={() => setSel((s) => ({ ...s, creator: null }))} onDelete={deleteCreator} onSaveSocials={updateCreatorSocials} onStageChange={updateDeliverableStage} />}
+              {activeModule === "creators" && sel.creator && <CreatorDetail creator={creatorById(sel.creator)} totals={creatorTotals(sel.creator)} invoices={creatorInvoicesWithJoins.filter((i) => i.creator?.id === sel.creator)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.creator?.id === sel.creator)} documents={db.documents.filter((d) => d.entityType === "creator" && d.entityId === sel.creator)} goTo={goTo} back={() => setSel((s) => ({ ...s, creator: null }))} onDelete={deleteCreator} onSaveSocials={updateCreatorSocials} />}
 
               {activeModule === "campaigns" && !sel.campaign && role !== "creator" && <CampaignsList campaigns={db.campaigns} brandById={brandById} campaignFinancials={campaignFinancials} goTo={goTo} onAdd={() => setModal({ type: "addCampaign" })} />}
               {activeModule === "campaigns" && role === "creator" && (() => {
                 const myCampIds = [...new Set(dealsWithJoins.filter(d => d.creatorId === demoCreatorId).map(d => d.campaignId))];
                 return <CampaignsList campaigns={db.campaigns.filter(c => myCampIds.includes(c.id))} brandById={brandById} campaignFinancials={campaignFinancials} goTo={goTo} restricted />;
               })()}
-              {activeModule === "campaigns" && sel.campaign && <CampaignDetail campaign={campaignById(sel.campaign)} brand={brandById(campaignById(sel.campaign)?.brandId)} deals={dealsWithJoins.filter((d) => d.campaignId === sel.campaign)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.campaign?.id === sel.campaign)} brandInvoices={brandInvoicesWithJoins.filter((b) => b.campaignId === sel.campaign)} financials={campaignFinancials(sel.campaign)} goTo={goTo} back={() => setSel((s) => ({ ...s, campaign: null }))} onAddDeal={() => setModal({ type: "addDeal", campaignId: sel.campaign })} onStatusChange={updateDeliverableStatus} role={role} onDeleteCampaign={deleteCampaign} onDeleteDeal={deleteDeal} onDeleteDeliverable={deleteDeliverable} />}
+              {activeModule === "campaigns" && sel.campaign && <CampaignDetail campaign={campaignById(sel.campaign)} brand={brandById(campaignById(sel.campaign)?.brandId)} deals={dealsWithJoins.filter((d) => d.campaignId === sel.campaign)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.campaign?.id === sel.campaign)} brandInvoices={brandInvoicesWithJoins.filter((b) => b.campaignId === sel.campaign)} financials={campaignFinancials(sel.campaign)} goTo={goTo} back={() => setSel((s) => ({ ...s, campaign: null }))} onAddDeal={() => setModal({ type: "addDeal", campaignId: sel.campaign })} onStatusChange={updateDeliverableStatus} onStagesChange={updateDeliverableStages} role={role} onDeleteCampaign={deleteCampaign} onDeleteDeal={deleteDeal} onDeleteDeliverable={deleteDeliverable} />}
 
               {activeModule === "deliverables" && <DeliverablesModule rows={role === "creator" ? deliverablesWithJoins.filter(d => d.creator?.id === demoCreatorId) : deliverablesWithJoins} onStatusChange={updateDeliverableStatus} goTo={goTo} role={role} onDelete={deleteDeliverable} />}
 
@@ -1236,12 +1222,10 @@ function CreatorsList({ creators, creatorTotals, goTo, onAdd, role }) {
   );
 }
 
-function CreatorDetail({ creator, totals, invoices, deliverablesWithJoins, documents, goTo, back, onDelete, onSaveSocials, onStageChange }) {
+function CreatorDetail({ creator, totals, invoices, deliverablesWithJoins, documents, goTo, back, onDelete, onSaveSocials }) {
   const [tab, setTab] = useState("overview");
   if (!creator) return null;
   const brandsWorked = [...new Set(totals.deals.map((d) => d.campaign?.brandId))].length;
-  // Only show deliverables belonging to active campaigns for the stage checklist
-  const activeDeliverables = deliverablesWithJoins.filter((d) => d.campaign?.status === "Active");
   return (
     <div>
       <SectionHeader title={creator.name} crumbs={[{ label: "Creators", onClick: back }, { label: creator.name }]} action={<Btn variant="danger" size="sm" icon={XCircle} onClick={() => onDelete(creator.id)}>Delete Creator</Btn>} />
@@ -1251,7 +1235,7 @@ function CreatorDetail({ creator, totals, invoices, deliverablesWithJoins, docum
         <KPICard label="Outstanding" value={inr(totals.outstanding)} tone="amber" />
         <KPICard label="Brands Worked With" value={brandsWorked} tone="slate" />
       </div>
-      <Tabs tab={tab} setTab={setTab} tabs={["overview", "stages", "social", "campaigns", "invoices", "documents"]} />
+      <Tabs tab={tab} setTab={setTab} tabs={["overview", "social", "campaigns", "invoices", "documents"]} />
       {tab === "overview" && (
         <div className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-5 grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
           <InfoRow label="Handle" value={`${creator.handle} · ${creator.platform}`} />
@@ -1262,9 +1246,6 @@ function CreatorDetail({ creator, totals, invoices, deliverablesWithJoins, docum
           <InfoRow label="Bank" value={`${creator.bank?.name} · ${creator.bank?.acc} · ${creator.bank?.ifsc}`} />
           <InfoRow label="Standard Commercials" value={creator.standard} full />
         </div>
-      )}
-      {tab === "stages" && (
-        <CreatorStagesChecklist deliverables={activeDeliverables} onStageChange={onStageChange} goTo={goTo} />
       )}
       {tab === "social" && (
         <SocialLinksEditor creator={creator} onSave={onSaveSocials} />
@@ -1328,7 +1309,7 @@ function CampaignsList({ campaigns, brandById, campaignFinancials, goTo, onAdd, 
   );
 }
 
-function CampaignDetail({ campaign, brand, deals, deliverablesWithJoins, brandInvoices, financials, goTo, back, onAddDeal, onStatusChange, role, onDeleteCampaign, onDeleteDeal, onDeleteDeliverable }) {
+function CampaignDetail({ campaign, brand, deals, deliverablesWithJoins, brandInvoices, financials, goTo, back, onAddDeal, onStatusChange, onStagesChange, role, onDeleteCampaign, onDeleteDeal, onDeleteDeliverable }) {
   const [tab, setTab] = useState("overview");
   if (!campaign) return null;
   return (
@@ -1374,23 +1355,13 @@ function CampaignDetail({ campaign, brand, deals, deliverablesWithJoins, brandIn
         </div>
       )}
       {tab === "deliverables" && (
-        <Table head={["Creator", "Type", "Brief", "Due", "Status", role !== "creator" ? "Update" : null, role !== "creator" ? "" : null].filter(Boolean)}>
-          {deliverablesWithJoins.map((d) => (
-            <Tr key={d.id}>
-              <Td>{d.creator?.name}</Td>
-              <Td muted>{d.type}</Td>
-              <Td muted>{d.brief}</Td>
-              <Td className={isPast(d.due) && !["Live", "Completed"].includes(d.status) ? "text-red-600" : ""}>{fmtDate(d.due)}</Td>
-              <Td><Badge tone={statusTone(d.status)}>{d.status}</Badge></Td>
-              {role !== "creator" && <Td>
-                <select value={d.status} onChange={(e) => onStatusChange(d.id, e.target.value)} className="text-xs border border-red-100 rounded-md px-1.5 py-1 f-body">
-                  {DELIVERABLE_FLOW.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </Td>}
-              {role !== "creator" && <Td><button onClick={() => onDeleteDeliverable(d.id)} title="Delete deliverable"><XCircle size={15} className="text-slate-400 hover:text-red-600" /></button></Td>}
-            </Tr>
-          ))}
-        </Table>
+        <CampaignDeliverablesByCreator
+          deliverablesWithJoins={deliverablesWithJoins}
+          onStatusChange={onStatusChange}
+          onStagesChange={onStagesChange}
+          onDeleteDeliverable={onDeleteDeliverable}
+          role={role}
+        />
       )}
       {tab === "brand invoice" && (
         <Table head={["Invoice #", "Date", "Total", "Received", "Pending", "Status", "Zoho"]}>
@@ -1407,6 +1378,70 @@ function CampaignDetail({ campaign, brand, deals, deliverablesWithJoins, brandIn
           ))}
         </Table>
       )}
+    </div>
+  );
+}
+
+/* ============================== DELIVERABLES GROUPED BY CREATOR, WITH STAGE TICKS ============================== */
+function CampaignDeliverablesByCreator({ deliverablesWithJoins, onStatusChange, onStagesChange, onDeleteDeliverable, role }) {
+  const byCreator = deliverablesWithJoins.reduce((acc, d) => {
+    const key = d.creator?.id || "unknown";
+    if (!acc[key]) acc[key] = { creator: d.creator, items: [] };
+    acc[key].items.push(d);
+    return acc;
+  }, {});
+  const groups = Object.values(byCreator);
+
+  if (groups.length === 0) return <EmptyState text="No deliverables yet for this campaign." />;
+
+  return (
+    <div className="space-y-5">
+      {groups.map((g) => (
+        <div key={g.creator?.id || "unknown"}>
+          <div className="text-sm font-semibold text-slate-800 f-display mb-2">{g.creator?.name || "Unknown Creator"}</div>
+          <div className="space-y-2">
+            {g.items.map((d) => (
+              <div key={d.id} className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-3.5">
+                <div className="flex items-center justify-between gap-3 mb-2.5 flex-wrap">
+                  <div>
+                    <div className="text-sm font-medium text-slate-900 f-body">{d.type} — {d.brief}</div>
+                    <div className="text-xs text-slate-400 f-body">Due {fmtDate(d.due)}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge tone={statusTone(d.status)}>{d.status}</Badge>
+                    {role !== "creator" && (
+                      <select value={d.status} onChange={(e) => onStatusChange(d.id, e.target.value)} className="text-xs border border-red-100 rounded-md px-1.5 py-1 f-body">
+                        {DELIVERABLE_FLOW.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    )}
+                    {role !== "creator" && <button onClick={() => onDeleteDeliverable(d.id)} title="Delete"><XCircle size={15} className="text-slate-400 hover:text-red-600" /></button>}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {STAGES.map((stage) => {
+                    const done = (d.stagesDone || []).includes(stage);
+                    return (
+                      <label key={stage} className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border cursor-pointer select-none transition-colors ${done ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-slate-50 border-slate-100 text-slate-500 hover:border-red-200"}`}>
+                        <input
+                          type="checkbox"
+                          checked={done}
+                          onChange={() => {
+                            const current = d.stagesDone || [];
+                            const next = done ? current.filter((s) => s !== stage) : [...current, stage];
+                            onStagesChange(d.id, next);
+                          }}
+                          className="accent-emerald-600"
+                        />
+                        {stage}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1914,48 +1949,6 @@ function SocialLinksEditor({ creator, onSave }) {
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-/* ============================== CREATOR STAGES CHECKLIST ============================== */
-function CreatorStagesChecklist({ deliverables, onStageChange, goTo }) {
-  if (deliverables.length === 0) {
-    return <EmptyState text="No deliverables in active campaigns for this creator." />;
-  }
-  return (
-    <div className="space-y-4">
-      {deliverables.map((d) => {
-        const currentIndex = STAGES.indexOf(d.stage || "Briefing");
-        return (
-          <div key={d.id} className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div onClick={() => goTo("campaigns", d.campaign?.id)} className="cursor-pointer">
-                <div className="text-sm font-medium text-slate-900 f-body">{d.brief}</div>
-                <div className="text-xs text-slate-400 f-body">{d.campaign?.name} · {d.type}</div>
-              </div>
-              <Badge tone={statusTone(d.status)}>{d.status}</Badge>
-            </div>
-            <div className="flex items-center gap-1">
-              {STAGES.map((stage, i) => {
-                const done = i <= currentIndex;
-                return (
-                  <button
-                    key={stage}
-                    onClick={() => onStageChange(d.id, stage)}
-                    className={`flex-1 flex flex-col items-center gap-1.5 py-2 rounded-lg border transition-colors ${done ? "bg-emerald-50 border-emerald-200" : "bg-slate-50 border-slate-100 hover:border-red-200"}`}
-                  >
-                    <span className={`w-5 h-5 rounded-full flex items-center justify-center border ${done ? "bg-emerald-500 border-emerald-500" : "bg-white border-slate-300"}`}>
-                      {done && <Check size={12} className="text-white" />}
-                    </span>
-                    <span className={`text-[10px] f-body text-center leading-tight ${done ? "text-emerald-700 font-medium" : "text-slate-500"}`}>{stage}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
     </div>
   );
 }
