@@ -42,6 +42,28 @@ const daysFromNow = (n) => { const d = new Date(); d.setDate(d.getDate() + n); r
 const isWithinWeek = (d) => { if (!d) return false; const t = new Date(); const target = new Date(d); const diff = (target - t) / 86400000; return diff >= -0.5 && diff <= 7; };
 const isPast = (d) => { if (!d) return false; return new Date(d) < new Date(new Date().toDateString()); };
 
+// Parses a scope string like "2 Reels + 1 Story" or "3 Reels" into individual
+// deliverable stubs: [{ type: "Reel", brief: "Reel 1" }, { type: "Reel", brief: "Reel 2" }, ...]
+// Falls back to a single generic deliverable if the scope doesn't parse cleanly.
+const parseScopeToDeliverables = (scope) => {
+  if (!scope || !scope.trim()) return [];
+  const parts = scope.split(/[+,]| and /i).map((s) => s.trim()).filter(Boolean);
+  const rawTypes = [];
+  parts.forEach((part) => {
+    const m = part.match(/^(\d+)\s*(.+)$/);
+    let count = 1, type = part;
+    if (m) { count = parseInt(m[1], 10) || 1; type = m[2]; }
+    type = type.trim().replace(/ies$/i, "y").replace(/s$/i, ""); // rough singularize
+    if (!type) return;
+    for (let i = 0; i < count; i++) rawTypes.push(type);
+  });
+  const seenCounts = {};
+  return rawTypes.map((type) => {
+    seenCounts[type] = (seenCounts[type] || 0) + 1;
+    return { type, brief: `${type} ${seenCounts[type]}` };
+  });
+};
+
 const timeAgo = (iso) => {
   if (!iso) return "";
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -744,12 +766,27 @@ export default function App() {
     fetchAllData();
   };
   const addDeal = async (payload) => {
-    const { error } = await supabase.from("deals").insert({
+    const { data: newDeal, error } = await supabase.from("deals").insert({
       campaign_id: payload.campaignId, creator_id: payload.creatorId, amount: payload.amount,
       scope: payload.scope, status: "Draft", approval: "Pending", notes: "",
-    });
+    }).select().single();
     if (error) { showToast("Failed to add deal: " + error.message); return; }
-    showToast("Deal added");
+
+    // Auto-create one deliverable per item parsed from the scope text
+    // (e.g. "2 Reels + 1 Story" → Reel 1, Reel 2, Story 1), each with its
+    // own independent stage checklist. Falls back to nothing if the scope
+    // doesn't parse — deliverables can still be added manually any time.
+    const items = parseScopeToDeliverables(payload.scope);
+    if (items.length > 0 && newDeal) {
+      const dueDate = payload.dueDate || daysFromNow(14);
+      const rows = items.map((it) => ({
+        deal_id: newDeal.id, type: it.type, brief: it.brief, due: dueDate,
+        status: "Brief", stages_done: [],
+      }));
+      const { error: dlvError } = await supabase.from("deliverables").insert(rows);
+      if (dlvError) { showToast("Deal added, but auto-creating deliverables failed: " + dlvError.message); fetchAllData(); return; }
+    }
+    showToast(items.length > 0 ? `Deal added with ${items.length} deliverable${items.length > 1 ? "s" : ""} created` : "Deal added");
     fetchAllData();
   };
   const addDeliverable = async (payload) => {
@@ -2046,12 +2083,19 @@ function AddCampaignModal({ brands, onClose, onSave }) {
   );
 }
 function AddDealModal({ creators, campaignId, onClose, onSave }) {
-  const [f, setF] = useState({ creatorId: creators[0]?.id, scope: "", amount: 0 });
+  const [f, setF] = useState({ creatorId: creators[0]?.id, scope: "", amount: 0, dueDate: daysFromNow(14) });
+  const preview = parseScopeToDeliverables(f.scope);
   return (
     <Modal title="Add Deal" onClose={onClose}>
       <Field label="Creator"><select className={inputCls} value={f.creatorId} onChange={(e) => setF({ ...f, creatorId: e.target.value })}>{creators.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
       <Field label="Scope (e.g. 2 Reels + 1 Story)"><input className={inputCls} value={f.scope} onChange={(e) => setF({ ...f, scope: e.target.value })} /></Field>
+      {preview.length > 0 && (
+        <div className="text-xs text-slate-500 f-body -mt-2 mb-3 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-2">
+          Will auto-create: {preview.map((p) => p.brief).join(", ")}
+        </div>
+      )}
       <Field label="Amount (₹)"><input type="number" className={inputCls} value={f.amount} onChange={(e) => setF({ ...f, amount: Number(e.target.value) })} /></Field>
+      <Field label="Deliverables Due Date"><input type="date" className={inputCls} value={f.dueDate} onChange={(e) => setF({ ...f, dueDate: e.target.value })} /></Field>
       <div className="flex justify-end gap-2 mt-3"><Btn onClick={() => onSave({ ...f, campaignId })}>Add Deal</Btn></div>
     </Modal>
   );
