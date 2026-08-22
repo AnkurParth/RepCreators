@@ -534,7 +534,7 @@ export default function App() {
         supabase.from("creators").select("*").order("created_at"),
         supabase.from("campaigns").select("*").order("created_at"),
         supabase.from("deals").select("*").order("created_at"),
-        supabase.from("deliverables").select("*").order("created_at"),
+        supabase.from("deliverables").select("*").order("created_at").order("id"),
         supabase.from("creator_invoices").select("*").order("created_at"),
         supabase.from("brand_invoices").select("*").order("created_at"),
         supabase.from("payments").select("*").order("created_at"),
@@ -1459,47 +1459,70 @@ function CampaignDeliverablesByCreator({ deliverablesWithJoins, onStatusChange, 
           <div className="text-sm font-semibold text-slate-800 f-display mb-2">{g.creator?.name || "Unknown Creator"}</div>
           <div className="space-y-2">
             {g.items.map((d) => (
-              <div key={d.id} className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-3.5">
-                <div className="flex items-center justify-between gap-3 mb-2.5 flex-wrap">
-                  <div>
-                    <div className="text-sm font-medium text-slate-900 f-body">{d.type} — {d.brief}</div>
-                    <div className="text-xs text-slate-400 f-body">Due {fmtDate(d.due)}</div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge tone={statusTone(d.status)}>{d.status}</Badge>
-                    {role !== "creator" && (
-                      <select value={d.status} onChange={(e) => onStatusChange(d.id, e.target.value)} className="text-xs border border-red-100 rounded-md px-1.5 py-1 f-body">
-                        {DELIVERABLE_FLOW.map((s) => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    )}
-                    {role !== "creator" && <button onClick={() => onDeleteDeliverable(d.id)} title="Delete"><XCircle size={15} className="text-slate-400 hover:text-red-600" /></button>}
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {STAGES.map((stage) => {
-                    const done = (d.stagesDone || []).includes(stage);
-                    return (
-                      <label key={stage} className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border cursor-pointer select-none transition-colors ${done ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-slate-50 border-slate-100 text-slate-500 hover:border-red-200"}`}>
-                        <input
-                          type="checkbox"
-                          checked={done}
-                          onChange={() => {
-                            const current = d.stagesDone || [];
-                            const next = done ? current.filter((s) => s !== stage) : [...current, stage];
-                            onStagesChange(d.id, next);
-                          }}
-                          className="accent-emerald-600"
-                        />
-                        {stage}
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
+              <DeliverableStageCard
+                key={d.id}
+                deliverable={d}
+                onStatusChange={onStatusChange}
+                onStagesChange={onStagesChange}
+                onDelete={onDeleteDeliverable}
+                role={role}
+              />
             ))}
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function DeliverableStageCard({ deliverable: d, onStatusChange, onStagesChange, onDelete, role }) {
+  // Local, per-card state seeded from the server value. Ticking updates this
+  // instantly (so the UI never lags or appears to affect a different card
+  // while the background save/refresh is in flight), and re-syncs if the
+  // server value for THIS specific deliverable id changes.
+  const [localStages, setLocalStages] = useState(d.stagesDone || []);
+  useEffect(() => { setLocalStages(d.stagesDone || []); }, [d.id, JSON.stringify(d.stagesDone)]);
+
+  const toggleStage = (stage) => {
+    const done = localStages.includes(stage);
+    const next = done ? localStages.filter((s) => s !== stage) : [...localStages, stage];
+    setLocalStages(next); // instant visual feedback, scoped only to this card
+    onStagesChange(d.id, next);
+  };
+
+  return (
+    <div className="bg-white border border-red-100 rounded-xl shadow-sm shadow-rose-900/10 p-3.5">
+      <div className="flex items-center justify-between gap-3 mb-2.5 flex-wrap">
+        <div>
+          <div className="text-sm font-medium text-slate-900 f-body">{d.type} — {d.brief}</div>
+          <div className="text-xs text-slate-400 f-body">Due {fmtDate(d.due)}</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge tone={statusTone(d.status)}>{d.status}</Badge>
+          {role !== "creator" && (
+            <select value={d.status} onChange={(e) => onStatusChange(d.id, e.target.value)} className="text-xs border border-red-100 rounded-md px-1.5 py-1 f-body">
+              {DELIVERABLE_FLOW.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          )}
+          {role !== "creator" && <button onClick={() => onDelete(d.id)} title="Delete"><XCircle size={15} className="text-slate-400 hover:text-red-600" /></button>}
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {STAGES.map((stage) => {
+          const done = localStages.includes(stage);
+          return (
+            <label key={`${d.id}-${stage}`} className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border cursor-pointer select-none transition-colors ${done ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-slate-50 border-slate-100 text-slate-500 hover:border-red-200"}`}>
+              <input
+                type="checkbox"
+                checked={done}
+                onChange={() => toggleStage(stage)}
+                className="accent-emerald-600"
+              />
+              {stage}
+            </label>
+          );
+        })}
+      </div>
     </div>
   );
 }
