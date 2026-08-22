@@ -23,6 +23,9 @@ const FontStyles = () => (
     .accent-bar::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; border-radius:3px 0 0 3px; }
     h1, h2, h3, .f-display { font-weight: 700; }
     body, input, select, textarea, button { -webkit-font-smoothing: antialiased; }
+    input[type=number]::-webkit-outer-spin-button,
+    input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
   `}</style>
 );
 
@@ -749,6 +752,15 @@ export default function App() {
     showToast("Deal added");
     fetchAllData();
   };
+  const addDeliverable = async (payload) => {
+    const { error } = await supabase.from("deliverables").insert({
+      deal_id: payload.dealId, type: payload.type, brief: payload.brief, due: payload.due,
+      status: "Brief", stages_done: [],
+    });
+    if (error) { showToast("Failed to add deliverable: " + error.message); return; }
+    showToast("Deliverable added");
+    fetchAllData();
+  };
   const createBrandInvoice = async (payload) => {
     const { error } = await supabase.from("brand_invoices").insert({
       campaign_id: payload.campaignId, invoice_number: payload.invoiceNumber, date: payload.date,
@@ -989,7 +1001,7 @@ export default function App() {
                 const myCampIds = [...new Set(dealsWithJoins.filter(d => d.creatorId === demoCreatorId).map(d => d.campaignId))];
                 return <CampaignsList campaigns={db.campaigns.filter(c => myCampIds.includes(c.id))} brandById={brandById} campaignFinancials={campaignFinancials} goTo={goTo} restricted />;
               })()}
-              {activeModule === "campaigns" && sel.campaign && <CampaignDetail campaign={campaignById(sel.campaign)} brand={brandById(campaignById(sel.campaign)?.brandId)} deals={dealsWithJoins.filter((d) => d.campaignId === sel.campaign)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.campaign?.id === sel.campaign)} brandInvoices={brandInvoicesWithJoins.filter((b) => b.campaignId === sel.campaign)} financials={campaignFinancials(sel.campaign)} goTo={goTo} back={() => setSel((s) => ({ ...s, campaign: null }))} onAddDeal={() => setModal({ type: "addDeal", campaignId: sel.campaign })} onStatusChange={updateDeliverableStatus} onStagesChange={updateDeliverableStages} role={role} onDeleteCampaign={deleteCampaign} onDeleteDeal={deleteDeal} onDeleteDeliverable={deleteDeliverable} />}
+              {activeModule === "campaigns" && sel.campaign && <CampaignDetail campaign={campaignById(sel.campaign)} brand={brandById(campaignById(sel.campaign)?.brandId)} deals={dealsWithJoins.filter((d) => d.campaignId === sel.campaign)} deliverablesWithJoins={deliverablesWithJoins.filter((d) => d.campaign?.id === sel.campaign)} brandInvoices={brandInvoicesWithJoins.filter((b) => b.campaignId === sel.campaign)} financials={campaignFinancials(sel.campaign)} goTo={goTo} back={() => setSel((s) => ({ ...s, campaign: null }))} onAddDeal={() => setModal({ type: "addDeal", campaignId: sel.campaign })} onAddDeliverable={() => setModal({ type: "addDeliverable", campaignId: sel.campaign })} onStatusChange={updateDeliverableStatus} onStagesChange={updateDeliverableStages} role={role} onDeleteCampaign={deleteCampaign} onDeleteDeal={deleteDeal} onDeleteDeliverable={deleteDeliverable} />}
 
               {activeModule === "deliverables" && <DeliverablesModule rows={role === "creator" ? deliverablesWithJoins.filter(d => d.creator?.id === demoCreatorId) : deliverablesWithJoins} onStatusChange={updateDeliverableStatus} goTo={goTo} role={role} onDelete={deleteDeliverable} />}
 
@@ -1015,6 +1027,7 @@ export default function App() {
       {modal?.type === "addCreator" && <AddCreatorModal onClose={() => setModal(null)} onSave={(p) => { addCreator(p); setModal(null); }} />}
       {modal?.type === "addCampaign" && <AddCampaignModal brands={db.brands} onClose={() => setModal(null)} onSave={(p) => { addCampaign(p); setModal(null); }} />}
       {modal?.type === "addDeal" && <AddDealModal creators={db.creators} campaignId={modal.campaignId} onClose={() => setModal(null)} onSave={(p) => { addDeal(p); setModal(null); }} />}
+      {modal?.type === "addDeliverable" && <AddDeliverableModal deals={dealsWithJoins.filter((d) => d.campaignId === modal.campaignId)} onClose={() => setModal(null)} onSave={(p) => { addDeliverable(p); setModal(null); }} />}
       {modal?.type === "submitInvoice" && <SubmitInvoiceModal deals={dealsWithJoins} onClose={() => setModal(null)} onSave={(p) => { submitCreatorInvoice(p); setModal(null); }} />}
       {modal?.type === "createBrandInvoice" && <CreateBrandInvoiceModal campaigns={db.campaigns} brandById={brandById} onClose={() => setModal(null)} onSave={(p) => { createBrandInvoice(p); setModal(null); }} />}
     </div>
@@ -1309,7 +1322,7 @@ function CampaignsList({ campaigns, brandById, campaignFinancials, goTo, onAdd, 
   );
 }
 
-function CampaignDetail({ campaign, brand, deals, deliverablesWithJoins, brandInvoices, financials, goTo, back, onAddDeal, onStatusChange, onStagesChange, role, onDeleteCampaign, onDeleteDeal, onDeleteDeliverable }) {
+function CampaignDetail({ campaign, brand, deals, deliverablesWithJoins, brandInvoices, financials, goTo, back, onAddDeal, onAddDeliverable, onStatusChange, onStagesChange, role, onDeleteCampaign, onDeleteDeal, onDeleteDeliverable }) {
   const [tab, setTab] = useState("overview");
   if (!campaign) return null;
   return (
@@ -1355,13 +1368,21 @@ function CampaignDetail({ campaign, brand, deals, deliverablesWithJoins, brandIn
         </div>
       )}
       {tab === "deliverables" && (
-        <CampaignDeliverablesByCreator
-          deliverablesWithJoins={deliverablesWithJoins}
-          onStatusChange={onStatusChange}
-          onStagesChange={onStagesChange}
-          onDeleteDeliverable={onDeleteDeliverable}
-          role={role}
-        />
+        <div>
+          {role !== "creator" && deals.length > 0 && (
+            <div className="flex justify-end mb-3"><Btn size="sm" icon={Plus} onClick={onAddDeliverable}>Add Deliverable</Btn></div>
+          )}
+          {deals.length === 0 && role !== "creator" && (
+            <div className="text-xs text-slate-400 f-body mb-3">Add a deal first (under the Deals tab) before adding deliverables — each deliverable belongs to a specific creator's deal.</div>
+          )}
+          <CampaignDeliverablesByCreator
+            deliverablesWithJoins={deliverablesWithJoins}
+            onStatusChange={onStatusChange}
+            onStagesChange={onStagesChange}
+            onDeleteDeliverable={onDeleteDeliverable}
+            role={role}
+          />
+        </div>
       )}
       {tab === "brand invoice" && (
         <Table head={["Invoice #", "Date", "Total", "Received", "Pending", "Status", "Zoho"]}>
@@ -2032,6 +2053,30 @@ function AddDealModal({ creators, campaignId, onClose, onSave }) {
       <Field label="Scope (e.g. 2 Reels + 1 Story)"><input className={inputCls} value={f.scope} onChange={(e) => setF({ ...f, scope: e.target.value })} /></Field>
       <Field label="Amount (₹)"><input type="number" className={inputCls} value={f.amount} onChange={(e) => setF({ ...f, amount: Number(e.target.value) })} /></Field>
       <div className="flex justify-end gap-2 mt-3"><Btn onClick={() => onSave({ ...f, campaignId })}>Add Deal</Btn></div>
+    </Modal>
+  );
+}
+function AddDeliverableModal({ deals, onClose, onSave }) {
+  const [f, setF] = useState({ dealId: deals[0]?.id || "", type: "Reel", brief: "", due: daysFromNow(14) });
+  return (
+    <Modal title="Add Deliverable" onClose={onClose}>
+      <Field label="Creator / Deal">
+        <select className={inputCls} value={f.dealId} onChange={(e) => setF({ ...f, dealId: e.target.value })}>
+          {deals.map((d) => <option key={d.id} value={d.id}>{d.creator?.name} — {d.scope}</option>)}
+        </select>
+      </Field>
+      <Field label="Type">
+        <select className={inputCls} value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}>
+          <option value="Reel">Reel</option>
+          <option value="Story">Story</option>
+          <option value="Post">Post</option>
+          <option value="Video">Video (YouTube)</option>
+          <option value="Live Session">Live Session</option>
+        </select>
+      </Field>
+      <Field label="Brief"><input className={inputCls} value={f.brief} onChange={(e) => setF({ ...f, brief: e.target.value })} placeholder="e.g. Product walkthrough reel" /></Field>
+      <Field label="Due Date"><input type="date" className={inputCls} value={f.due} onChange={(e) => setF({ ...f, due: e.target.value })} /></Field>
+      <div className="flex justify-end gap-2 mt-3"><Btn onClick={() => f.dealId && f.brief && onSave(f)}>Add Deliverable</Btn></div>
     </Modal>
   );
 }
