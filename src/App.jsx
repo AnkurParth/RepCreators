@@ -327,7 +327,7 @@ const KPICard = ({ label, value, tone = "slate", icon: Icon, sub, onClick }) => 
       <div className="flex items-start justify-between">
         <div>
           <div className="text-[11px] font-medium text-slate-500 uppercase tracking-wide f-body">{label}</div>
-          <div className="f-ledger text-metric text-slate-900 mt-1 whitespace-nowrap">{value}</div>
+          <div className="f-ledger text-metric text-slate-900 mt-1" style={{ whiteSpace: "nowrap" }}>{value}</div>
           {sub && <div className="text-xs text-slate-400 mt-0.5 f-body">{sub}</div>}
         </div>
         {Icon && <Icon size={16} className="text-slate-300 mt-0.5" />}
